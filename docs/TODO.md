@@ -200,6 +200,39 @@ Periodically clean up old completed items.
 - [ ] Add usage/cost review procedure
 - [ ] Document significant incident template
 
+## Security (deferred beyond the initial schema/RLS migration)
+
+The initial migration set enforces the trust boundaries (spoiler gate, admin
+authorization, submission immutability, server-side payload validation,
+transactional aggregates, share-link authorization) at the database level. The
+items below are follow-up hardening that depends on real traffic, later
+features, or infrastructure not yet in place.
+
+- [ ] Rate limiting / abuse protection for guest-facing RPCs, especially
+  `submit_ranking` and `create_share` (also `get_results` / `get_share` scans).
+  Guests are unauthenticated (`anon`), so the current defenses are only the
+  per-guest unique index and Supabase platform limits. Add per-IP / per-guest
+  throttling (edge middleware, a lightweight counter table, or a platform WAF
+  rule) before or shortly after public launch. Keep it simple first
+  (SECURITY.md sec 19).
+- [ ] Revisit guest identity hardening beyond the initial signed httpOnly
+  `guest_id` cookie if abuse (ballot stuffing, fake community volume) becomes a
+  real problem. Options to weigh only if needed: proof-of-work, attestation,
+  soft account nudge before results, server-side correlation heuristics. Avoid
+  invasive fingerprinting (SECURITY.md sec 26).
+- [ ] Revisit public profile discovery/access when friend discovery and public
+  profile pages are implemented. Direct `SELECT` on `public.profiles` is
+  currently authenticated-only and anonymous share visitors get sender info
+  only through controlled RPCs (`get_share`). When usernames become searchable,
+  expose the minimum via a dedicated search RPC / view rather than widening the
+  table policy; keep enumeration surface as narrow as possible (SECURITY.md
+  sec 6, sec 24).
+- [ ] Review whether additional production security controls are needed before
+  public launch, based on observed traffic and abuse patterns: CAPTCHA on
+  sign-up / guest submit, bot filtering, anomaly alerts, tighter CORS/CSP,
+  automated RLS regression tests in CI, periodic advisor review. Decide with
+  data, not speculation (CLAUDE.md sec 6, SECURITY.md sec 30).
+
 ---
 
 # Ideas
