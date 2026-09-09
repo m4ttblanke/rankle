@@ -158,8 +158,23 @@ Once the final font choices are established, record them here.
 
 ### Current Font Decisions
 
-- Display: TBD
-- Interface/body: TBD
+Decided in Milestone 1 (Step 2). Loaded via `next/font/google` in `app/layout.tsx`
+(self-hosted by Next at build time — no runtime request to Google, no layout
+shift). Exposed as CSS variables and Tailwind utilities.
+
+- **Display: Bricolage Grotesque** — `--font-display` / `font-display` utility.
+  Weights 600/700/800. A contemporary display grotesque with deliberate
+  "imperfect" details: playful and crafted without being childish, which
+  matches the tactile, approachable feel the tier board and cards need.
+  Use for game moments only: hero/marketing headlines, tier letters, big
+  result-reveal numbers, section titles. Not for body copy.
+- **Interface / body: Hanken Grotesk** — `--font-sans` / default `font-sans`.
+  Weights 400/500/600/700. A friendly, highly readable neutral workhorse
+  (not Inter/Roboto/system). Use for everything else: body, controls,
+  labels, metadata.
+
+Because display/body contrast is subtler than a serif+sans pairing, hierarchy
+leans on **size, weight, and the type scale** — keep that contrast deliberate.
 
 Do not introduce additional fonts without a clear reason.
 
@@ -171,34 +186,51 @@ Use a small neutral foundation plus strong tier colors.
 
 The UI should remain readable even when tier colors are visually prominent.
 
+All colors are **OKLCH** (supported by every Next.js 16 target browser).
+Defined on `:root` in `app/globals.css` and mapped to Tailwind utilities via
+`@theme inline`. **Light mode only for MVP**; every token lives on `:root` so a
+dark theme can be added as an override block with no restructuring (see
+`app/globals.css` bottom note, and section 8).
+
 ### Base Tokens
 
-Record final values once selected:
+Established in Milestone 1 (Step 2). Neutrals are warm-tinted; no pure black or
+pure white. The accent is a magenta-crimson chosen to sit **outside** the S–D
+hue ramp so primary actions never read as a tier.
 
 ```text
---background:
---foreground:
---surface:
---surface-muted:
---border:
---muted:
---accent:
---accent-foreground:
+--background:         oklch(0.985 0.006 95)   warm paper
+--foreground:         oklch(0.22  0.02  60)   warm near-black ink
+--surface:            oklch(0.995 0.004 95)   cards / raised
+--surface-muted:      oklch(0.96  0.008 95)   unranked pool / recessed
+--border:             oklch(0.90  0.01  95)   hairline
+--muted:              oklch(0.50  0.02  60)   secondary / meta text
+--accent:             oklch(0.55  0.21  350)  primary action
+--accent-foreground:  oklch(0.99  0.01  350)
 ```
 
 ### Tier Tokens
 
+**Provisional** — meet WCAG AA (verified by `lib/design/contrast.test.ts`) and
+will be visually reviewed and finalized once the first tier board exists. Each
+tier has three tokens: `fill`, `foreground` (the letter label on the fill), and
+`border` (the row outline / drop-target edge).
+
 ```text
---tier-s:
---tier-a:
---tier-b:
---tier-c:
---tier-d:
+         fill                      foreground                border
+--tier-s  oklch(0.55 0.20 25)   oklch(0.99 0.02 25)   oklch(0.42 0.17 25)   red
+--tier-a  oklch(0.62 0.16 50)   oklch(0.21 0.03 50)   oklch(0.45 0.13 50)   orange
+--tier-b  oklch(0.80 0.14 85)   oklch(0.26 0.04 85)   oklch(0.52 0.12 85)   amber
+--tier-c  oklch(0.54 0.14 150)  oklch(0.99 0.02 150)  oklch(0.40 0.11 150)  green
+--tier-d  oklch(0.52 0.13 245)  oklch(0.99 0.02 245)  oklch(0.40 0.11 245)  blue
 ```
 
 Tier colors must remain distinguishable and accessible.
 
-Do not rely on color alone to communicate tier identity; retain visible tier labels.
+Do not rely on color alone to communicate tier identity: the board always
+renders the **tier letter** and the **`--tier-*-border` outline** alongside the
+fill. `lib/design/contrast.test.ts` enforces label-on-fill ≥ 4.5:1 and
+outline-on-background ≥ 3:1 for every tier.
 
 ---
 
@@ -240,13 +272,17 @@ Rankable cards can have enough radius to feel tactile and approachable.
 
 Avoid making every surface extremely rounded.
 
-Record the final radius scale here once established.
+### Current Radius Scale
 
-Example categories:
+Established in Milestone 1 (Step 2). In `app/globals.css`, mapped to Tailwind
+`rounded-sm/md/lg/xl`.
 
-- Small controls
-- Cards/items
-- Large surfaces
+```text
+--radius-sm:  0.375rem  (6px)   chips, small controls
+--radius-md:  0.625rem  (10px)  buttons, inputs
+--radius-lg:  0.875rem  (14px)  rankable cards (the most tactile surface)
+--radius-xl:  1.25rem   (20px)  sheets, large surfaces
+```
 
 ---
 
@@ -692,19 +728,23 @@ Do not assume a compiling UI is visually correct.
 
 ## 35. Current Open Design Decisions
 
-Complete these once the initial visual direction is approved:
+Decided in Milestone 1 (Step 2):
 
-- Product name
-- Logo/wordmark
-- Display font
-- Interface font
-- Base color palette
-- Tier colors
-- Radius scale
-- Motion timing
-- Card style
-- Landing-page visual language
-- Light/dark strategy
+- [x] Display font — Bricolage Grotesque (sec 6)
+- [x] Interface font — Hanken Grotesk (sec 6)
+- [x] Base color palette — OKLCH tokens (sec 7)
+- [x] Tier colors — provisional, AA-verified (sec 7); finalize after first board
+- [x] Radius scale — sec 10
+- [x] Light/dark strategy — light only for MVP; tokens structured for later dark (sec 8)
+
+Still open:
+
+- [ ] Product name (currently "Rankle")
+- [ ] Logo/wordmark
+- [ ] Motion timing
+- [ ] Card style (settle alongside the first tier board / drag feedback)
+- [ ] Landing-page visual language (deferred to Polish phase)
+- [ ] Tier color final review (after the first tier board exists)
 
 Until decided, avoid prematurely locking arbitrary choices into many files.
 

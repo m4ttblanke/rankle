@@ -251,17 +251,17 @@ Copy the example environment file:
 cp .env.example .env.local
 ```
 
-Configure the required values in `.env.local`.
-
-Depending on the current application configuration, these may include:
+Configure the required values in `.env.local`. As of Milestone 1:
 
 ```text
-NEXT_PUBLIC_SUPABASE_URL=
-NEXT_PUBLIC_SUPABASE_ANON_KEY=
-SUPABASE_SERVICE_ROLE_KEY=
+NEXT_PUBLIC_SUPABASE_URL=                  # https://<project-ref>.supabase.co
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=     # the "sb_publishable_..." key
+NEXT_PUBLIC_APP_URL=                       # optional; defaults to http://localhost:3000
+SUPABASE_SERVICE_ROLE_KEY=                # server-only; not used yet, leave blank
 ```
 
-Refer to `.env.example` for the current required variables.
+`.env.example` is the authoritative list, with notes on which values are public
+vs server-only. `lib/env.ts` validates the public vars at startup.
 
 **Never commit `.env.local`, API keys, database credentials, service-role keys, or other secrets to Git.**
 
@@ -350,21 +350,32 @@ Schema changes should be made through version-controlled migrations rather than 
 
 Changes should be tested before being merged or deployed.
 
-### Application Tests
+### Commands
 
-Run the project's configured test suite using the scripts defined in `package.json`.
+```bash
+npm run lint        # ESLint (flat config)
+npm run typecheck   # tsc --noEmit
+npm test            # Vitest — unit + read-only integration
+npm run test:e2e    # Playwright end-to-end (auto-starts the dev server)
+npm run build       # production build (also runs the type check)
+```
 
-### End-to-End Testing
+First-time e2e setup: `npx playwright install chromium`.
 
-Rankle uses Playwright for browser-level testing of important user flows such as:
+### Unit / integration (Vitest)
 
-- Completing a daily ranking
-- Submitting a ranking
-- Unlocking results
-- Spoiler protection
-- Shared rankings
-- Authentication
-- Admin functionality
+`lib/**/*.test.ts` and `components/**/*.test.tsx`. Includes a narrowly scoped
+**read-only** check against the remote Supabase project that verifies the RLS
+trust boundaries (anon can list released games; the spoiler-gated tables and the
+results RPC are closed). It creates/modifies nothing and skips when Supabase env
+vars are absent.
+
+### End-to-End (Playwright)
+
+`e2e/` — currently covers the daily-game shell, the empty state, the read-only
+tier board (via a dev-only preview route with sample data), responsive layout at
+320–430px, and the 404 page. Flows such as ranking, submission, results, spoiler
+protection, sharing, auth, and admin will be added as those features land.
 
 ### Database & RLS Testing
 

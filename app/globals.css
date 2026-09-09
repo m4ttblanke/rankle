@@ -1,0 +1,119 @@
+@import "tailwindcss";
+
+/* ============================================================================
+ * Rankle design tokens  —  established in Milestone 1 Step 2, recorded in
+ * docs/DESIGN.md (sections 6, 7, 10).
+ *
+ * MVP is light mode only. Every token is defined on :root so a dark theme can
+ * later be added as an override block (see "DARK MODE" note at the bottom)
+ * without restructuring anything.
+ *
+ * Colors are OKLCH (supported by all Next.js 16 target browsers). Tier colors
+ * are PROVISIONAL — they meet WCAG AA (verified by lib/design/contrast.test.ts)
+ * and will be visually reviewed and finalized once the first tier board exists.
+ * Tier identity is never conveyed by fill color alone: the board always renders
+ * the tier letter and a --tier-*-border outline alongside the fill.
+ * ========================================================================== */
+
+:root {
+  /* --- base neutrals (warm-tinted; no pure black / pure white) --- */
+  --background: oklch(0.985 0.006 95);
+  --foreground: oklch(0.22 0.02 60);
+  --surface: oklch(0.995 0.004 95);
+  --surface-muted: oklch(0.96 0.008 95);
+  --border: oklch(0.9 0.01 95);
+  --muted: oklch(0.5 0.02 60); /* secondary / meta text */
+
+  /* --- brand accent (magenta-crimson; deliberately outside the S–D hue ramp
+         so primary actions never read as a tier) --- */
+  --accent: oklch(0.55 0.21 350);
+  --accent-foreground: oklch(0.99 0.01 350);
+
+  /* --- tier ramp: warm (S) -> cool (D). fill / label-on-fill / outline --- */
+  --tier-s: oklch(0.55 0.2 25);
+  --tier-s-foreground: oklch(0.99 0.02 25);
+  --tier-s-border: oklch(0.42 0.17 25);
+
+  --tier-a: oklch(0.62 0.16 50);
+  --tier-a-foreground: oklch(0.21 0.03 50);
+  --tier-a-border: oklch(0.45 0.13 50);
+
+  --tier-b: oklch(0.8 0.14 85);
+  --tier-b-foreground: oklch(0.26 0.04 85);
+  --tier-b-border: oklch(0.52 0.12 85);
+
+  --tier-c: oklch(0.54 0.14 150);
+  --tier-c-foreground: oklch(0.99 0.02 150);
+  --tier-c-border: oklch(0.4 0.11 150);
+
+  --tier-d: oklch(0.52 0.13 245);
+  --tier-d-foreground: oklch(0.99 0.02 245);
+  --tier-d-border: oklch(0.4 0.11 245);
+
+  /* --- radius scale (restrained; cards are the most tactile surface) --- */
+  --radius-sm: 0.375rem; /* chips, small controls */
+  --radius-md: 0.625rem; /* buttons, inputs */
+  --radius-lg: 0.875rem; /* rankable cards */
+  --radius-xl: 1.25rem; /* sheets, large surfaces */
+}
+
+/* Expose tokens to Tailwind utilities: bg-background, text-muted, border-border,
+ * bg-tier-s / text-tier-s-foreground, font-display, rounded-lg, etc. */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
+  --color-border: var(--border);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+
+  --color-tier-s: var(--tier-s);
+  --color-tier-s-foreground: var(--tier-s-foreground);
+  --color-tier-s-border: var(--tier-s-border);
+  --color-tier-a: var(--tier-a);
+  --color-tier-a-foreground: var(--tier-a-foreground);
+  --color-tier-a-border: var(--tier-a-border);
+  --color-tier-b: var(--tier-b);
+  --color-tier-b-foreground: var(--tier-b-foreground);
+  --color-tier-b-border: var(--tier-b-border);
+  --color-tier-c: var(--tier-c);
+  --color-tier-c-foreground: var(--tier-c-foreground);
+  --color-tier-c-border: var(--tier-c-border);
+  --color-tier-d: var(--tier-d);
+  --color-tier-d-foreground: var(--tier-d-foreground);
+  --color-tier-d-border: var(--tier-d-border);
+
+  --font-display: var(--font-bricolage), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-hanken), ui-sans-serif, system-ui, sans-serif;
+
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+  --radius-xl: var(--radius-xl);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}
+
+/* Respect reduced-motion globally (DESIGN.md sec 21). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* DARK MODE (not in MVP): add
+ *   @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { ...token overrides... } }
+ *   :root[data-theme="dark"] { ...token overrides... }
+ * redefining only the custom properties above. The @theme mapping and all
+ * component code stay unchanged. */

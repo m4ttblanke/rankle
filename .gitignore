@@ -2,9 +2,32 @@
 .env
 .env.local
 .env.*.local
+# (.env.example is intentionally tracked)
 
 # Dependencies
 node_modules/
+
+# Next.js
+/.next/
+/out/
+/build
+*.tsbuildinfo
+next-env.d.ts
+.next-profiles/
+
+# Testing
+/coverage
+/test-results/
+/playwright-report/
+/playwright/.cache/
+.playwright-mcp/
+
+# Vercel
+.vercel
+
+# Misc
+.DS_Store
+*.pem
 
 # Local Claude Code settings (per-developer; keep settings.json tracked)
 .claude/settings.local.json

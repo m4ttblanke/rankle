@@ -57,25 +57,30 @@ Document exact versions in `README.md` or package configuration.
 
 Use:
 
-- `.env.example` for variable names
-- `.env.local` for local secrets
+- `.env.example` for variable names (kept in sync with the app; the source of
+  truth for what is required)
+- `.env.local` for local values. Never commit it.
 
-Never commit `.env.local`.
-
-Example categories:
+Currently required (see `.env.example` for the authoritative list and notes):
 
 ```text
-NEXT_PUBLIC_APP_URL=
+# Public — inlined into the browser bundle, gated by RLS
+NEXT_PUBLIC_SUPABASE_URL=                  # https://<project-ref>.supabase.co
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=     # the "sb_publishable_..." key
+NEXT_PUBLIC_APP_URL=                       # defaults to http://localhost:3000 if unset
 
-NEXT_PUBLIC_SUPABASE_URL=
-NEXT_PUBLIC_SUPABASE_ANON_KEY=
-SUPABASE_SERVICE_ROLE_KEY=
+# Server-only — never prefix with NEXT_PUBLIC_
+SUPABASE_SERVICE_ROLE_KEY=          # bypasses RLS; unused as of Milestone 1
 
-NEXT_PUBLIC_POSTHOG_KEY=
-NEXT_PUBLIC_POSTHOG_HOST=
-
-SENTRY_DSN=
+# Local design tooling only (not read by the app)
+API_KEY_21ST=
 ```
+
+`lib/env.ts` validates the public vars at startup with Zod and fails fast with a
+clear message if one is missing or malformed.
+
+Analytics (`NEXT_PUBLIC_POSTHOG_*`) and monitoring (`SENTRY_DSN`) are not wired
+yet — add them here when those services are introduced.
 
 Only include variables for services actually used.
 
@@ -296,11 +301,23 @@ Recommended bootstrap:
 4. Verify server-side authorization
 5. Record the procedure here
 
-Exact production procedure:
+Exact production procedure (schema is implemented as of the initial migration
+set; see `supabase/README.md` "Admin bootstrap"):
 
-```text
-TBD once schema is implemented.
-```
+1. The person signs in normally to create their `auth.users` row and `profiles`
+   row (the `handle_new_user` trigger creates the profile).
+2. From a privileged SQL session (Supabase dashboard SQL editor or a direct
+   service-role connection), run:
+
+   ```sql
+   update public.profiles set is_admin = true where id = '<uuid>';
+   ```
+
+3. Verify: `private.is_admin()` returns true for that user; admin-only RLS
+   policies on `tierlists` / `tierlist_items` now allow writes.
+
+`profiles.is_admin` has **no** client column-update grant (migration 4), so it
+cannot be set through the API — only from a role that bypasses RLS.
 
 Do not build a public endpoint to assign admin roles.
 

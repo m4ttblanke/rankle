@@ -7,10 +7,10 @@ in the dashboard.
 
 | File | Creates |
 |---|---|
-| `20260908120001_core_schema.sql` | `private` schema + `app_tz()`/`today()` helpers, `profiles` (+ `handle_new_user` trigger on `auth.users`), `tierlists`, `tierlist_items`, `is_admin()`, `is_tierlist_public()`, `tier_weight()`, `tg_set_updated_at()` |
-| `20260908120002_submissions_results.sql` | `submissions`, `submission_items` (+ UPDATE-block immutability triggers), `tierlist_item_stats`, `has_submitted()`, `submit_ranking()` RPC, `get_results()` RPC |
-| `20260908120003_sharing.sql` | `shares`, `create_share()` RPC, `get_share()` RPC |
-| `20260908120004_rls_security_hardening.sql` | `enable row level security` on all 7 tables, revoke Supabase's default blanket table grants and re-grant the minimum, all RLS policies, `revoke execute` on the pre-existing `public.rls_auto_enable()` |
+| `20260909003800_core_schema.sql` | `private` schema + `app_tz()`/`today()` helpers, `profiles` (+ `handle_new_user` trigger on `auth.users`), `tierlists`, `tierlist_items`, `is_admin()`, `is_tierlist_public()`, `tier_weight()`, `tg_set_updated_at()` |
+| `20260909003851_submissions_results.sql` | `submissions`, `submission_items` (+ UPDATE-block immutability triggers), `tierlist_item_stats`, `has_submitted()`, `submit_ranking()` RPC, `get_results()` RPC |
+| `20260909003915_sharing.sql` | `shares`, `create_share()` RPC, `get_share()` RPC |
+| `20260909003945_rls_security_hardening.sql` | `enable row level security` on all 7 tables, revoke Supabase's default blanket table grants and re-grant the minimum, all RLS policies, `revoke execute` on the pre-existing `public.rls_auto_enable()` |
 
 `seed.sql` is **local only** (`supabase db reset`); it is not applied to the
 remote project by `supabase db push`.
@@ -49,16 +49,13 @@ update public.profiles set is_admin = true where id = '<uuid>';
 ## Applied
 
 All four migrations were applied to `zhivsldkpavidxzrgtjl` on 2026-09-09 and
-recorded in `supabase_migrations.schema_migrations` in order as `core_schema`,
-`submissions_results`, `sharing`, `rls_security_hardening`. Post-apply
-verification: structure, privileges, and a 30-assertion behavioural suite
-against the live schema all pass; advisors show only intentional-by-design
+recorded in `supabase_migrations.schema_migrations` as `20260909003800`
+`core_schema`, `20260909003851` `submissions_results`, `20260909003915`
+`sharing`, `20260909003945` `rls_security_hardening`. The migration filenames in
+this directory match those recorded versions, so local and remote history agree.
+Post-apply verification: structure, privileges, and a 30-assertion behavioural
+suite against the live schema all pass; advisors show only intentional-by-design
 notices (see below). No seed data; no admin bootstrapped yet.
-
-> Note: `apply_migration` stamped its own timestamps (`20260909003800`…), which
-> differ from these files' `20260908120001`… prefixes. Before the first
-> `supabase db push`, rename these four files to match the recorded versions (or
-> `supabase migration repair`) so local and remote history agree.
 
 ## Validation status (pre-apply)
 

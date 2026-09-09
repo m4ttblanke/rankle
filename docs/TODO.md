@@ -23,37 +23,37 @@ Periodically clean up old completed items.
 
 ## Foundation
 
-- [ ] Choose final product name
-- [ ] Finalize repository/package naming
-- [ ] Initialize Next.js + TypeScript project
-- [ ] Configure Tailwind CSS
-- [ ] Configure shadcn/ui
-- [ ] Configure Motion for React
-- [ ] Configure dnd-kit
-- [ ] Configure Supabase project
-- [ ] Add `.env.example`
-- [ ] Add initial Supabase migrations
-- [ ] Establish base error handling
-- [ ] Establish lint/typecheck/test commands
+- [ ] Choose final product name (working name: "Rankle")
+- [ ] Finalize repository/package naming (package `name` set to `rankle`)
+- [x] Initialize Next.js + TypeScript project (Next 16, App Router, Turbopack)
+- [x] Configure Tailwind CSS (v4, CSS-first `@theme`)
+- [ ] Configure shadcn/ui (deferred until a primitive is needed)
+- [ ] Configure Motion for React (deferred until interactive ranking)
+- [ ] Configure dnd-kit (deferred until interactive ranking)
+- [x] Configure Supabase project (`@supabase/ssr` browser + server clients, generated types, `lib/env.ts`)
+- [x] Add `.env.example` (annotated public vs server-only)
+- [x] Add initial Supabase migrations (applied pre-M1; filenames now match remote history)
+- [x] Establish base error handling (`app/error.tsx`, `app/not-found.tsx`, `DailyGameError`, env validation)
+- [x] Establish lint/typecheck/test commands (`lint`, `typecheck`, `test` (Vitest), `test:e2e` (Playwright))
 
 ## Design
 
-- [ ] Establish initial visual direction
-- [ ] Choose display font
-- [ ] Choose interface font
-- [ ] Define base color tokens
-- [ ] Define S/A/B/C/D tier colors
-- [ ] Define basic radius/surface system
-- [ ] Update `DESIGN.md` with approved decisions
-- [ ] Build first responsive daily-game layout
+- [x] Establish initial visual direction (tokens + type, light mode only)
+- [x] Choose display font (Bricolage Grotesque)
+- [x] Choose interface font (Hanken Grotesk)
+- [x] Define base color tokens (OKLCH, `app/globals.css`)
+- [x] Define S/A/B/C/D tier colors (provisional; AA-verified; review after first board — done)
+- [x] Define basic radius/surface system
+- [x] Update `DESIGN.md` with approved decisions
+- [x] Build first responsive daily-game layout (read-only tier board; verified 320–430px)
 
 ## Core Game
 
-- [ ] Create tier-list data model
-- [ ] Create tier-list item data model
-- [ ] Seed development games
-- [ ] Resolve today's game from canonical timezone
-- [ ] Build tier board
+- [ ] Create tier-list data model (schema exists; app-side Zod shaping in `lib/game/schema.ts`)
+- [ ] Create tier-list item data model (schema exists)
+- [ ] Seed development games (local `supabase/seed.sql` only; remote intentionally empty)
+- [x] Resolve today's game from canonical timezone (`lib/game/get-daily-game.ts`; TZ gate enforced by RLS)
+- [x] Build tier board (read-only render; drag / non-drag interaction still pending below)
 - [ ] Add drag-and-drop ranking
 - [ ] Add non-drag ranking alternative
 - [ ] Require all items before submission
@@ -277,3 +277,30 @@ Track unresolved product choices here until decided.
 Move meaningful completed items here temporarily when useful.
 
 Remove stale completed items during periodic cleanup once they no longer provide useful project history.
+
+## Milestone 1 — app scaffold + read-only daily game (2026-09-08)
+
+Next.js 16 scaffold; Tailwind v4 + OKLCH design tokens + Bricolage/Hanken fonts
+(light mode only); `@supabase/ssr` client wiring + validated env; today's-game
+resolver (RLS-enforced release gate, no app-side timezone); read-only tier board
+at `/` with empty/error/not-found states; Vitest unit + read-only RLS
+integration tests; Playwright e2e; lint/typecheck/build green.
+
+Follow-ups it surfaced:
+
+- [ ] Resolver query-semantics tests (ignores future `scheduled` / `draft` /
+  `disabled`, picks the latest of several released games) — needs an isolated
+  local/test Supabase env with fixtures. Currently only `mapDailyGame` (pure)
+  and a read-only "no game -> null, no error" remote check are covered.
+- [x] Standardize the public key var name on `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+  (was `NEXT_PUBLIC_SUPABASE_ANON_KEY`); value is the `sb_publishable_...` key.
+- [ ] Add an app icon / favicon (browser requests `/favicon.ico`, currently 404).
+- [x] `.nvmrc` set to `22.19.0` (satisfies the `undici` engine requirement).
+  Dev machines still on 22.18.0 should install/switch to >= 22.19.
+- [ ] `app/dev/preview` is a dev-only tier-board harness (404 in production).
+  Revisit once an isolated test DB exists — it may be replaceable by real
+  fixtures/seed in e2e.
+- [ ] Consider caching the daily-game read (revalidate once per day) when
+  traffic makes the per-request query worth avoiding.
+- [ ] `shadcn` is still an unused devDependency (CLI only) — wire up shadcn/ui
+  when the first primitive is needed, or drop it.
