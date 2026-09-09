@@ -53,10 +53,10 @@ Periodically clean up old completed items.
 - [ ] Create tier-list item data model (schema exists)
 - [ ] Seed development games (local `supabase/seed.sql` only; remote intentionally empty)
 - [x] Resolve today's game from canonical timezone (`lib/game/get-daily-game.ts`; TZ gate enforced by RLS)
-- [x] Build tier board (read-only render; drag / non-drag interaction still pending below)
-- [ ] Add drag-and-drop ranking
-- [ ] Add non-drag ranking alternative
-- [ ] Require all items before submission
+- [x] Build tier board (Milestone 2: interactive `RankingBoard`, one `useReducer` in `lib/game/ranking.ts`)
+- [x] Add drag-and-drop ranking (dnd-kit; whole card is the drag surface; `pointerWithin` collision)
+- [x] Add non-drag ranking alternative (shared inline `MovePicker` — tap/click/keyboard; ▲/▼ reorder; same `MOVE` path)
+- [x] Require all items before submission (UI only — completion state "All N ranked ✓"; server enforcement is Milestone 3)
 - [ ] Implement official submission
 - [ ] Enforce one registered-user submission per game
 - [ ] Make submitted rankings immutable
@@ -304,3 +304,37 @@ Follow-ups it surfaced:
   traffic makes the per-request query worth avoiding.
 - [ ] `shadcn` is still an unused devDependency (CLI only) — wire up shadcn/ui
   when the first primitive is needed, or drop it.
+
+## Milestone 2 — interactive ranking (2026-09-08)
+
+Static tier board → interactive `RankingBoard` (`app/page.tsx` + `app/dev/preview`).
+One `useReducer` over `lib/game/ranking.ts` (`placement: Record<container, id[]>`
++ `selectedItemId`); one `moveItem` operation. Desktop drag via dnd-kit
+(`@dnd-kit/core` + `/sortable` + `/utilities`), whole card as drag surface,
+`pointerWithin`→`closestCorners` collision, `MouseSensor` distance 8 /
+`TouchSensor` delay 200. Shared inline `MovePicker` for tap + keyboard, ▲/▼
+reorder — all through the same `MOVE`. Live-region announcements, focus return,
+completion state, no submit control, no persistence, no network. Old
+`components/game/tier-board.tsx` (+ test) deleted. Visual polish pass: tier-wash
+lanes, tier-badge monograms + accent bar on placed cards, dashed pool, HUD.
+Vitest 64 pass, Playwright 21 pass, lint/typecheck/build green.
+
+Follow-ups it surfaced:
+
+- [ ] Draft persistence decision: docs don't require pre-submission persistence,
+  so M2 keeps ranking in memory only (refresh resets). Revisit if playtesting
+  shows accidental loss is a real pain — a `localStorage` draft keyed by game id
+  would be the minimal fix; keep it off the server.
+- [ ] Deeper drag e2e once an isolated test DB exists: multi-item reorder via
+  drag, drag from a populated tier, drop precision at small widths. Current e2e
+  covers pool→tier, tier→tier, and reorder via the ▲/▼ controls.
+- [ ] `web-design-guidelines` audit noted the card drag surface is a
+  `div[role="button"]` containing the ▲/▼ `<button>`s (nested interactives).
+  This is the accepted dnd-kit whole-card pattern with full keyboard support
+  (Enter/Space, focus ring, `aria-expanded`/`aria-haspopup`); revisit only if
+  real SR testing shows a problem.
+- [ ] Tier colours are still provisional (M1). Now that a populated board
+  exists, do the deferred visual review — especially the amber B wash, which is
+  the warmest/palest of the five.
+- [ ] `RankingBoard` handles a 0-item game defensively ("No items to rank.")
+  but that state shouldn't reach production; admin validation later.

@@ -1,9 +1,9 @@
 import { notFound } from "next/navigation";
-import { TierBoard } from "@/components/game/tier-board";
+import { RankingBoard } from "@/components/game/ranking-board";
 import { SAMPLE_DAILY_GAME } from "@/lib/game/fixtures";
 
 /**
- * Dev-only preview of the read-only tier board with sample data, for visual
+ * Dev-only preview of the interactive ranking board with sample data, for visual
  * review and e2e tests. Returns 404 in production builds — it is not a product
  * route and never reads a database.
  */
@@ -30,7 +30,7 @@ export default function TierBoardPreview() {
             <p className="text-sm text-muted sm:text-base">{game.prompt}</p>
           ) : null}
         </div>
-        <TierBoard game={game} />
+        <RankingBoard game={game} />
       </main>
     </div>
   );

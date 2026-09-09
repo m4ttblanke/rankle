@@ -1,13 +1,13 @@
 import { NoGameToday } from "@/components/game/empty-state";
-import { TierBoard } from "@/components/game/tier-board";
+import { RankingBoard } from "@/components/game/ranking-board";
 import { getDailyGame } from "@/lib/game/get-daily-game";
 
 /**
- * The daily game screen. Milestone 1: resolves today's game via Supabase (RLS
- * enforces release-date + publication) and renders it as a read-only tier board,
- * or the empty state when nothing is live. No community/results/share data is
- * fetched here — that stays behind the post-submission spoiler gate
- * (docs/SECURITY.md sec 7).
+ * The daily game screen. Resolves today's game via Supabase (RLS enforces
+ * release-date + publication) and renders the interactive ranking board, or the
+ * empty state when nothing is live. No community/results/share data is fetched
+ * here — that stays behind the post-submission spoiler gate (docs/SECURITY.md
+ * sec 7). Ranking is local-only in Milestone 2: nothing is written back.
  */
 export default async function HomePage() {
   const game = await getDailyGame();
@@ -31,7 +31,7 @@ export default async function HomePage() {
               <p className="text-sm text-muted sm:text-base">{game.prompt}</p>
             ) : null}
           </div>
-          <TierBoard game={game} />
+          <RankingBoard game={game} />
         </main>
       ) : (
         <main className="flex flex-1 flex-col">

@@ -321,6 +321,21 @@ The unranked area should clearly differ from final tiers.
 
 Avoid excessive instructions if the interaction can explain itself.
 
+### As built (Milestone 2)
+
+- Each tier lane = a bold `--tier-*` letter chip + a lane carrying a **whisper
+  wash** of that tier's colour (`tierStyle(label).lane`, ~5–6% tint). The board
+  reads as a board, not a table.
+- The unranked pool is visually plainer and set apart: `--surface-muted` with a
+  **dashed** border ("holding area").
+- Drop target: the hovered lane lifts its wash (~12%) and gains a
+  `--tier-*-border` ring. Nothing else animates during a drag.
+- Empty lane state is a quiet "Empty"; the pool's is "Everything is ranked".
+- One HUD line: the remaining count as a large Bricolage figure (`tabular-nums`)
+  + "left to rank"; on completion, "All N ranked ✓" (check in `--tier-c`).
+- Custom `tier_config` labels get the neutral fallback (`tierStyle` → NEUTRAL)
+  and stay fully functional — no behaviour keys off the literal S/A/B/C/D.
+
 ---
 
 ## 13. Rankable Cards
@@ -352,6 +367,22 @@ Important states:
 
 Dragging should create clear spatial feedback.
 
+### As built (Milestone 2)
+
+A card is a tactile **tile**, not a form row:
+
+- Monogram + name; when the card sits in a tier the monogram becomes that
+  tier's badge (`tierStyle(tier).chip`) and a 3px left bar picks up the tier
+  colour — so placements scan at a glance, **always** alongside the tier
+  letter, never colour alone.
+- States: `idle` (soft shadow, `active:scale-.98` press), `selected` (accent
+  ring, lifts above siblings), `dragging` (dashed ghost placeholder at ~50%),
+  `overlay` (the `<DragOverlay>` clone — shadow, slight rotate + scale).
+- The **whole card** is the pointer drag surface (`MouseSensor` distance 8 /
+  `TouchSensor` delay 200 + tolerance 8, so a tap selects and a swipe scrolls);
+  `touch-action: pan-y` lets the page scroll through it.
+- Long names wrap to two lines (`line-clamp-2`), never overflow.
+
 ---
 
 ## 14. Non-Drag Ranking
@@ -363,6 +394,22 @@ A selected item can expose a compact tier picker.
 The alternative should feel designed, not like an accessibility afterthought.
 
 Do not create two completely different visual systems for drag and non-drag input.
+
+### As built (Milestone 2)
+
+**One** picker, **one** state path. Activating a card (tap / click / Enter /
+Space) selects it; the `<MovePicker>` appears **inline, directly after that
+card** on every viewport — the fastest layout for both thumb and mouse, since
+the control lands where you just acted (evaluated in-browser at 320–1280px; a
+fixed bottom bar added more travel for the common tap flow). It offers one
+destination button per `tier_config` entry (tier-coloured, Bricolage) plus
+"Unranked"; the current location is marked `aria-current`. Reordering within a
+tier uses ▲ / ▼ controls that appear on the selected card. Escape or the ✕
+closes it; focus returns to the moved card.
+
+Drag, tap, keyboard, and reorder all dispatch the same `MOVE` action on the
+single `useReducer` ranking state (`lib/game/ranking.ts`). An `aria-live`
+region announces every move and the remaining count.
 
 ---
 
@@ -383,6 +430,13 @@ At submission:
 After submission:
 
 - Transition directly into the reveal experience
+
+### As built (Milestone 2)
+
+Ranking is **local only** and there is **no submit control yet** — a real
+"Submit ranking" button arrives in Milestone 3 with `submit_ranking`. Milestone
+2 ends at the completion state: "All N ranked ✓". No affordance that looks
+actionable without working functionality.
 
 ---
 
