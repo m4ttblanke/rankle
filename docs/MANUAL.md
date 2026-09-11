@@ -146,6 +146,15 @@ Draft data, if stored, is distinct from the official submission.
 
 Drafts do not affect statistics.
 
+**As built (Milestone 3):** once every item is ranked, a "Submit ranking"
+control appears; a lightweight inline confirmation ("Lock it in") — not a
+modal — makes the irreversible commitment explicit before the write happens.
+Success is shown only after the database confirms it (never optimistically).
+A failed attempt leaves the ranking exactly as the player left it. After a
+successful submission, or on any later visit once the identity is recognised
+as having already submitted, the board is replaced by a restrained "Ranking
+locked in" state — no results yet (Milestone 4).
+
 ---
 
 ## 7. Spoiler Gate
@@ -263,6 +272,13 @@ Accounts unlock persistence and social features.
 Avoid invasive fingerprinting.
 
 Guest replay prevention can remain lightweight unless abuse becomes a real problem.
+
+**As built (Milestone 3):** guest identity is a signed httpOnly cookie, minted
+server-side on first submission (see `docs/SECURITY.md` sec 26). A guest who
+already submitted today's game is recognised on a later visit via
+`has_submitted_ranking` and sees the locked state directly, without re-ranking.
+Clearing cookies starts over as a new guest — accepted per MANUAL sec 12's
+"lightweight" guidance above.
 
 ---
 

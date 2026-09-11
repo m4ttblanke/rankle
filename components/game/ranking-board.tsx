@@ -26,6 +26,8 @@ import { MovePicker } from "./move-picker";
 import { RankableCard } from "./rankable-card";
 import { RankingContainer } from "./ranking-container";
 import { SortableItem } from "./sortable-item";
+import { SubmitBar } from "./submit-bar";
+import { SubmittedPanel } from "./submitted-panel";
 
 function usePrefersReducedMotion() {
   const [reduced, setReduced] = useState(false);
@@ -69,9 +71,18 @@ function moveMessage(
  * The interactive daily ranking board — the one stateful client component
  * (docs/DESIGN.md sec 2, sec 12). One `useReducer`, one `moveItem` operation;
  * pointer drag, the tap/keyboard picker, and the reorder buttons all dispatch
- * the same `MOVE`. No persistence, no network, no submission (Milestone 2).
+ * the same `MOVE`. `RankingState` stays the source of truth right up to a
+ * confirmed official submission (Milestone 3), at which point the board is
+ * replaced by the locked panel — so the submitted ranking can never be mutated.
  */
-export function RankingBoard({ game }: { game: DailyGame }) {
+export function RankingBoard({
+  game,
+  alreadySubmitted = false,
+}: {
+  game: DailyGame;
+  /** Server-resolved: this identity already has an official submission today. */
+  alreadySubmitted?: boolean;
+}) {
   const [state, dispatch] = useReducer(
     rankingReducer,
     game,
@@ -79,9 +90,22 @@ export function RankingBoard({ game }: { game: DailyGame }) {
   );
   const [activeId, setActiveId] = useState<string | null>(null);
   const [liveMsg, setLiveMsg] = useState("");
+  const [submitted, setSubmitted] = useState<"locked" | "already" | null>(
+    alreadySubmitted ? "already" : null,
+  );
+  const [boardFrozen, setBoardFrozen] = useState(false);
   const pendingAnnounce = useRef<{ itemId: string; to: string } | null>(null);
   const focusItemId = useRef<string | null>(null);
   const reduceMotion = usePrefersReducedMotion();
+
+  // After a submission confirmed this session, move focus to the locked panel.
+  // Not on the initial `alreadySubmitted` render — that would steal focus on
+  // load.
+  useEffect(() => {
+    if (submitted === "locked" || (submitted === "already" && !alreadySubmitted)) {
+      document.getElementById("submitted-heading")?.focus();
+    }
+  }, [submitted, alreadySubmitted]);
 
   const itemsById = useMemo(
     () => new Map(game.items.map((i) => [i.id, i])),
@@ -199,6 +223,10 @@ export function RankingBoard({ game }: { game: DailyGame }) {
 
   const activeItem = activeId ? itemsById.get(activeId) : undefined;
 
+  if (submitted) {
+    return <SubmittedPanel variant={submitted} />;
+  }
+
   return (
     <DndContext
       sensors={sensors}
@@ -207,7 +235,15 @@ export function RankingBoard({ game }: { game: DailyGame }) {
       onDragEnd={onDragEnd}
       onDragCancel={() => setActiveId(null)}
     >
-      <div className="flex flex-col gap-3">
+      {/* `inert` while a submit is in flight: blocks every pointer/keyboard
+          interaction (including drag) in one line, so the ranking cannot be
+          mutated mid-request. Keep `sensors` constant regardless — toggling
+          the array itself (rather than gating input via `inert`) breaks
+          dnd-kit's own effect dependency array. */}
+      <div
+        inert={boardFrozen}
+        className={`flex flex-col gap-3 ${boardFrozen ? "opacity-60" : ""}`}
+      >
         <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5">
           <p>
             {total === 0 ? (
@@ -283,6 +319,17 @@ export function RankingBoard({ game }: { game: DailyGame }) {
             />
           ))}
         </div>
+
+        {total > 0 ? (
+          <SubmitBar
+            game={game}
+            state={state}
+            complete={complete}
+            remaining={remaining}
+            onSubmitting={setBoardFrozen}
+            onSubmitted={setSubmitted}
+          />
+        ) : null}
       </div>
 
       <DragOverlay dropAnimation={reduceMotion ? null : undefined}>

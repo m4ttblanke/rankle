@@ -189,5 +189,30 @@ create policy stats_select_after_submit_or_admin
 --    Advisors 0028/0029: it is a SECURITY DEFINER function in the exposed
 --    `public` schema that anon/authenticated can invoke via /rest/v1/rpc.
 --    It is only meant to run from the `ensure_rls` event trigger.
+--
+--    PORTABILITY GUARD: `public.rls_auto_enable()` is a platform object that
+--    pre-exists on the hosted Rankle project but is NOT created by this
+--    migration set, so a clean database (e.g. a local `supabase start`) does
+--    not have it. The revoke is wrapped in an existence check on the exact
+--    zero-argument, event_trigger-returning function so the migration replays
+--    from scratch anywhere. When the function is absent there is nothing to
+--    harden and this is a no-op; the revoke is unchanged when it is present.
+--    This is the one statement that makes the checked-in migration-4 body
+--    intentionally not byte-identical to what was historically applied to the
+--    remote (which ran the bare revoke); no behaviour differs on the remote.
 ------------------------------------------------------------------------
-revoke execute on function public.rls_auto_enable() from public, anon, authenticated;
+do $$
+begin
+  if exists (
+    select 1
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public'
+      and p.proname = 'rls_auto_enable'
+      and p.pronargs = 0
+      and p.prorettype = 'pg_catalog.event_trigger'::regtype
+  ) then
+    execute 'revoke execute on function public.rls_auto_enable() from public, anon, authenticated';
+  end if;
+end
+$$;

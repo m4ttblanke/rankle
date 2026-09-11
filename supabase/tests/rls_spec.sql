@@ -118,6 +118,13 @@ $$;
 -- =====================================================================
 -- fixtures (run as owner; bypasses RLS)
 -- =====================================================================
+-- Start from a known-empty state regardless of any local dev seed
+-- (supabase/seed.sql inserts demo games, one released today, which would
+-- collide with the fixtures below). Everything here is inside the
+-- BEGIN ... ROLLBACK wrapper, so nothing is actually removed.
+truncate table public.tierlists cascade;
+delete from auth.users;
+
 insert into auth.users (id, aud, role, email, email_confirmed_at, created_at, updated_at)
 values
   ('aaaaaaaa-0000-0000-0000-000000000001', 'authenticated', 'authenticated', 'alice@rankle.test', now(), now(), now()),
@@ -168,10 +175,52 @@ begin
 end;
 $$;
 
-select pg_temp.expect_err('anon cannot call private.today()',        'anon',          null, 'select private.today()', '42501');
-select pg_temp.expect_err('authed cannot call private.is_admin()',   'authenticated', 'bbbbbbbb-0000-0000-0000-000000000002', 'select private.is_admin()', '42501');
-select pg_temp.expect_err('authed cannot call private.has_submitted','authenticated', 'bbbbbbbb-0000-0000-0000-000000000002', 'select private.has_submitted(''11111111-1111-1111-1111-111111111111'')', '42501');
-select pg_temp.expect_err('authed cannot call rls_auto_enable()',    'authenticated', 'bbbbbbbb-0000-0000-0000-000000000002', 'select public.rls_auto_enable()', '42501');
+select pg_temp.expect_err('anon cannot call private.today()', 'anon', null, 'select private.today()', '42501');
+
+-- private.is_admin() / private.has_submitted() are INTENTIONALLY EXECUTE-granted
+-- to anon/authenticated (migrations 1-2): Postgres requires the querying role
+-- to hold EXECUTE on any SECURITY DEFINER function named inside an RLS policy
+-- expression, or every anon/authenticated read gated by that policy fails
+-- outright (see migration 1's comment above `grant execute on function
+-- private.is_admin()`). This is a SQL-level grant only -- it does NOT imply
+-- HTTP/API exposure: PostgREST only serves functions from its exposed
+-- schema(s) (`public`), never `private`, so these are not reachable as RPC
+-- endpoints regardless of this grant. That boundary is verified separately in
+-- lib/supabase/private-schema-exposure.integration.test.ts (local Supabase).
+select pg_temp.expect_ok('authed CAN call private.is_admin() (required for RLS policy evaluation; not API-reachable)',
+  'authenticated', 'bbbbbbbb-0000-0000-0000-000000000002', 'select private.is_admin()');
+select pg_temp.expect_ok('authed CAN call private.has_submitted() (required for RLS policy evaluation; not API-reachable)',
+  'authenticated', 'bbbbbbbb-0000-0000-0000-000000000002',
+  'select private.has_submitted(''11111111-1111-1111-1111-111111111111'')');
+
+-- public.rls_auto_enable() is a remote-only, pre-existing Supabase platform
+-- event-trigger function (see migration 4's portability-guard comment) -- not
+-- created by any migration here, so a clean local database never has it.
+-- Only assert the revoke where the exact zero-argument, event_trigger-
+-- returning function actually exists (mirrors the migration-4 guard's own
+-- identity check, so a same-named-but-different overload can't satisfy it).
+do $$
+begin
+  if exists (
+    select 1
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public'
+      and p.proname = 'rls_auto_enable'
+      and p.pronargs = 0
+      and p.prorettype = 'pg_catalog.event_trigger'::regtype
+  ) then
+    perform pg_temp.expect_err('authed cannot call rls_auto_enable() (remote platform object)',
+      'authenticated', 'bbbbbbbb-0000-0000-0000-000000000002', 'select public.rls_auto_enable()', '42501');
+  else
+    perform pg_temp.rec(
+      'rls_auto_enable() check: function absent on this database (expected on a clean local stack)',
+      true,
+      'not applicable outside the remote platform project'
+    );
+  end if;
+end;
+$$;
 
 -- =====================================================================
 -- 2. visibility / spoiler gate on base tables
@@ -333,6 +382,52 @@ begin
   perform pg_temp.rec('aggregate C = {D:1,B:1} total=2 weight=4',
     (select tier_counts = '{"B": 1, "D": 1}'::jsonb and total_submissions = 2 and sum_weight = 4
      from public.tierlist_item_stats where tierlist_item_id = '10000000-0000-0000-0000-0000000000c1'));
+end;
+$$;
+
+-- =====================================================================
+-- 4b. has_submitted_ranking: spoiler-safe submission-state check (M3)
+--     State so far: guest 0f..01 and registered user bob (bb..02) have each
+--     submitted to live-game (11..11); carol (cc..03) has not; nobody has
+--     submitted to future-game (22..22).
+-- =====================================================================
+do $$
+begin
+  perform pg_temp.rec('has_submitted_ranking: submitting guest -> true',
+    pg_temp.eval_as('anon', null,
+      'select to_jsonb(public.has_submitted_ranking(''11111111-1111-1111-1111-111111111111'',
+        ''0f000000-0000-0000-0000-000000000001''))') = 'true'::jsonb);
+
+  perform pg_temp.rec('has_submitted_ranking: different guest id -> false',
+    pg_temp.eval_as('anon', null,
+      'select to_jsonb(public.has_submitted_ranking(''11111111-1111-1111-1111-111111111111'',
+        ''0f000000-0000-0000-0000-0000000000ff''))') = 'false'::jsonb);
+
+  perform pg_temp.rec('has_submitted_ranking: anon + null guest -> false',
+    pg_temp.eval_as('anon', null,
+      'select to_jsonb(public.has_submitted_ranking(''11111111-1111-1111-1111-111111111111'', null))')
+      = 'false'::jsonb);
+
+  perform pg_temp.rec('has_submitted_ranking: guest has no submission for other game -> false',
+    pg_temp.eval_as('anon', null,
+      'select to_jsonb(public.has_submitted_ranking(''22222222-2222-2222-2222-222222222222'',
+        ''0f000000-0000-0000-0000-000000000001''))') = 'false'::jsonb);
+
+  perform pg_temp.rec('has_submitted_ranking: submitting user (bob), null guest -> true',
+    pg_temp.eval_as('authenticated', 'bbbbbbbb-0000-0000-0000-000000000002',
+      'select to_jsonb(public.has_submitted_ranking(''11111111-1111-1111-1111-111111111111'', null))')
+      = 'true'::jsonb);
+
+  perform pg_temp.rec('has_submitted_ranking: non-submitting user (carol) -> false',
+    pg_temp.eval_as('authenticated', 'cccccccc-0000-0000-0000-000000000003',
+      'select to_jsonb(public.has_submitted_ranking(''11111111-1111-1111-1111-111111111111'', null))')
+      = 'false'::jsonb);
+
+  -- an authenticated caller cannot read another identity's state by passing a guest id
+  perform pg_temp.rec('has_submitted_ranking: authed caller + someone else''s guest id -> false',
+    pg_temp.eval_as('authenticated', 'cccccccc-0000-0000-0000-000000000003',
+      'select to_jsonb(public.has_submitted_ranking(''11111111-1111-1111-1111-111111111111'',
+        ''0f000000-0000-0000-0000-000000000001''))') = 'false'::jsonb);
 end;
 $$;
 

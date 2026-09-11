@@ -235,6 +235,14 @@ Submission and aggregate updates should be atomic where practical.
 
 Retrying a request must not double-count community statistics.
 
+**As built (Milestone 3):** the only client-reachable write path is the
+`submitRanking` Server Action (`app/actions/submit-ranking.ts`), which reads
+identity from the trusted guest cookie (never the request body), shape-validates
+the payload, and calls `submit_ranking` under the RLS (publishable-key) client —
+never the service-role key. A duplicate/retry that hits the database's unique
+index is reported to the UI as an "already submitted" locked state, not an
+error the player must resolve.
+
 ---
 
 ## 11. Input Validation
@@ -493,15 +501,29 @@ Do not build a large moderation system before social features require it.
 
 Guest play should not require invasive fingerprinting.
 
-Potential lightweight mechanisms:
+**As built (Milestone 3):** a guest is a random v4 UUID (`crypto.randomUUID()`)
+carried in a signed, httpOnly cookie (`rankle_guest`; `lib/game/guest.ts`):
 
-- Signed cookie
-- Anonymous local identifier
-- Server-issued guest token
+- httpOnly — browser JavaScript can neither read nor forge it; never sent to
+  the client, never logged, never placed in an RSC payload.
+- HMAC-SHA256 signed with the server-only `GUEST_COOKIE_SECRET`, verified with
+  a constant-time comparison; a value that fails to verify is treated as no
+  cookie at all.
+- `SameSite=Lax`, `Secure` in production, `Path=/`, ~400-day `Max-Age`.
+- Minted only server-side (a Server Action), never accepted as a value the
+  client supplies — the submission Server Action reads it from the cookie and
+  ignores any identity-shaped field in the request body (`.strict()` Zod
+  schema in `lib/game/submission.ts`).
 
-Treat guest mechanisms as anti-repeat convenience, not strong identity proof.
+Treat this as anti-repeat convenience, not strong identity proof: the database
+unique index on `(tierlist_id, guest_id)` is the actual enforcement, and a
+guest who clears cookies can always start over as a new identity. Do not claim
+a guest is uniquely identified across devices unless that is actually true.
 
-Do not claim a guest is uniquely identified across devices unless that is actually true.
+Submission-state recognition for a guest (has this identity already submitted
+today's game?) uses `public.has_submitted_ranking(tierlist_id, guest_id)` — a
+`SECURITY DEFINER` RPC that returns only a boolean, never community or ranking
+data, so it is safe to call before the spoiler gate opens (sec 7).
 
 ---
 

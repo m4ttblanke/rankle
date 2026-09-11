@@ -1,4 +1,5 @@
 import type { DailyGame } from "./schema";
+import type { SubmissionItem } from "./submission";
 
 /**
  * The one source of truth for the interactive ranking board (Milestone 2).
@@ -106,6 +107,27 @@ export function unrankedCount(state: RankingState): number {
 
 export function isComplete(state: RankingState): boolean {
   return unrankedCount(state) === 0;
+}
+
+/**
+ * Derive the exact `submit_ranking` payload from the ranking state. A pure
+ * projection of `RankingState` — NOT a second representation. Tier order follows
+ * `game.tierConfig`; within a tier, `position` is the array index, so the
+ * player's ordering is preserved exactly. Unranked items are omitted (official
+ * submission is gated on an empty pool, both in the UI and by the RPC).
+ */
+export function toSubmissionPayload(
+  state: RankingState,
+  game: DailyGame,
+): SubmissionItem[] {
+  const payload: SubmissionItem[] = [];
+  for (const tier of game.tierConfig) {
+    const ids = state.placement[tier] ?? [];
+    ids.forEach((itemId, position) => {
+      payload.push({ item_id: itemId, tier, position });
+    });
+  }
+  return payload;
 }
 
 // --- reducer ---------------------------------------------------------------

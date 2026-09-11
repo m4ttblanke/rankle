@@ -9,13 +9,24 @@ async function expectNoHorizontalScroll(page: Page) {
   expect(overflow, "page has horizontal scroll").toBeLessThanOrEqual(0);
 }
 
+/*
+ * `/` now talks to the local Supabase stack (Milestone 3; see .env.test +
+ * playwright.config.ts), seeded by `supabase/seed.sql` with a live
+ * "Fast Food Fries" game — so this suite exercises the real daily-game read
+ * path instead of the empty state. The empty state itself (`NoGameToday`) is
+ * covered as a component test (components/game/empty-state.test.tsx), since
+ * nothing in this repo's local seed produces "no game published" on `/`.
+ */
 test.describe("/ (daily game)", () => {
-  test("renders the shell and the empty state (no game published)", async ({
+  test("renders the shell and today's live game, pre-submission and spoiler-free", async ({
     page,
   }) => {
-    const supabaseCalls: string[] = [];
+    const spoilerBearingCalls: string[] = [];
     page.on("request", (r) => {
-      if (/\/rest\/v1\/rpc\//.test(r.url())) supabaseCalls.push(r.url());
+      const u = r.url();
+      if (/get_results|get_share|has_submitted_ranking/.test(u)) {
+        spoilerBearingCalls.push(u);
+      }
     });
 
     await page.goto("/");
@@ -23,14 +34,19 @@ test.describe("/ (daily game)", () => {
       page.getByRole("banner").getByText("Rankle", { exact: true }),
     ).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: /no game today/i }),
+      page.getByRole("heading", { level: 1, name: "Fast Food Fries" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("list", { name: /unranked items/i }),
     ).toBeVisible();
 
-    // no spoiler-bearing data, and no results/share RPC calls
+    // no community/friend/results data, and no results/spoiler RPC calls
+    // (has_submitted_ranking is only called when a guest cookie already
+    // exists, which a first visit never has)
     await expect(
       page.getByText(/consensus|controvers|friends? played|hottest take/i),
     ).toHaveCount(0);
-    expect(supabaseCalls).toEqual([]);
+    expect(spoilerBearingCalls).toEqual([]);
   });
 
   for (const width of MOBILE_WIDTHS) {

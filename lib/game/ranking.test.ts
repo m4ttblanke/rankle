@@ -8,6 +8,7 @@ import {
   isComplete,
   moveItem,
   rankingReducer,
+  toSubmissionPayload,
   unrankedCount,
   type RankingState,
 } from "./ranking";
@@ -186,5 +187,58 @@ describe("rankingReducer", () => {
     s = rankingReducer(s, { type: "RESET", game });
     expect(s.placement.S).toEqual([]);
     expect(unrankedCount(s)).toBe(4);
+  });
+});
+
+describe("toSubmissionPayload", () => {
+  it("derives one row per placed item, tier order following tierConfig", () => {
+    let s = createInitialRanking(game); // tierConfig S,A,B,C,D
+    s = moveItem(s, { itemId: "item-a", to: "A" });
+    s = moveItem(s, { itemId: "item-b", to: "S" });
+    s = moveItem(s, { itemId: "item-c", to: "A" });
+    expect(toSubmissionPayload(s, game)).toEqual([
+      { item_id: "item-b", tier: "S", position: 0 },
+      { item_id: "item-a", tier: "A", position: 0 },
+      { item_id: "item-c", tier: "A", position: 1 },
+    ]);
+  });
+
+  it("position is the within-tier array index, preserving reorder", () => {
+    let s = createInitialRanking(game);
+    for (const id of ["item-d", "item-c", "item-b", "item-a"]) {
+      s = moveItem(s, { itemId: id, to: "B" });
+    }
+    s = moveItem(s, { itemId: "item-b", to: "B", toIndex: 0 }); // reorder to front
+    expect(toSubmissionPayload(s, game)).toEqual([
+      { item_id: "item-b", tier: "B", position: 0 },
+      { item_id: "item-d", tier: "B", position: 1 },
+      { item_id: "item-c", tier: "B", position: 2 },
+      { item_id: "item-a", tier: "B", position: 3 },
+    ]);
+  });
+
+  it("omits unranked items entirely", () => {
+    let s = createInitialRanking(game);
+    s = moveItem(s, { itemId: "item-a", to: "S" });
+    // b, c, d stay in the pool
+    expect(toSubmissionPayload(s, game)).toEqual([
+      { item_id: "item-a", tier: "S", position: 0 },
+    ]);
+  });
+
+  it("empty ranking yields an empty payload", () => {
+    const s = createInitialRanking(game);
+    expect(toSubmissionPayload(s, game)).toEqual([]);
+  });
+
+  it("works with custom tier labels", () => {
+    const customGame = makeGame(["Top", "Mid", "Bot"], ["x", "y"]);
+    let s = createInitialRanking(customGame);
+    s = moveItem(s, { itemId: "item-y", to: "Bot" });
+    s = moveItem(s, { itemId: "item-x", to: "Top" });
+    expect(toSubmissionPayload(s, customGame)).toEqual([
+      { item_id: "item-x", tier: "Top", position: 0 },
+      { item_id: "item-y", tier: "Bot", position: 0 },
+    ]);
   });
 });

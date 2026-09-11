@@ -56,10 +56,10 @@ Periodically clean up old completed items.
 - [x] Build tier board (Milestone 2: interactive `RankingBoard`, one `useReducer` in `lib/game/ranking.ts`)
 - [x] Add drag-and-drop ranking (dnd-kit; whole card is the drag surface; `pointerWithin` collision)
 - [x] Add non-drag ranking alternative (shared inline `MovePicker` — tap/click/keyboard; ▲/▼ reorder; same `MOVE` path)
-- [x] Require all items before submission (UI only — completion state "All N ranked ✓"; server enforcement is Milestone 3)
-- [ ] Implement official submission
-- [ ] Enforce one registered-user submission per game
-- [ ] Make submitted rankings immutable
+- [x] Require all items before submission (UI-gated pre-M3; server-enforced by `submit_ranking` as of Milestone 3)
+- [x] Implement official submission (Milestone 3: `submitRanking` Server Action -> `submit_ranking` RPC)
+- [x] Enforce one registered-user submission per game (DB unique index, pre-existing; app now surfaces it as a locked state)
+- [x] Make submitted rankings immutable (DB trigger + no client grants, pre-existing; app now unmounts ranking controls after success)
 
 ## Results
 
@@ -338,3 +338,51 @@ Follow-ups it surfaced:
   the warmest/palest of the five.
 - [ ] `RankingBoard` handles a 0-item game defensively ("No items to rank.")
   but that state shouldn't reach production; admin validation later.
+
+## Milestone 3 — official submission (2026-09-10)
+
+Real "Submit ranking" control with a lightweight inline confirm ("Lock it
+in", no modal) atop the unchanged M2 `RankingState`/`useReducer`/`moveItem`.
+`toSubmissionPayload` derives the RPC payload from the ranking state — no
+second representation. Guest identity: a random UUID in a signed
+(HMAC-SHA256), httpOnly `rankle_guest` cookie (`lib/game/guest.ts`), minted
+only server-side. `submitRanking` Server Action (`app/actions/submit-ranking.ts`)
+is the sole client-reachable write path — RLS client only, identity from the
+cookie, `.strict()` Zod shape validation, `submit_ranking` remains the
+authoritative/atomic write. New migration 5: `has_submitted_ranking(tierlist_id,
+guest_id)` — a boolean-only, spoiler-safe RPC so a later visit (or a duplicate
+submit) is recognised as a locked state without fetching results. Post-success
+the board unmounts entirely in favor of a restrained "Ranking locked in" panel
+— no results/community data (Milestone 4). Local Supabase (Docker) stands up
+the isolated mutation/integration/E2E test environment; production received
+only the migration, never test writes. 125 Vitest + 36 Playwright green,
+lint/typecheck/build green.
+
+Follow-ups it surfaced:
+
+- [ ] `GUEST_COOKIE_SECRET` is validated lazily (first cookie read/write), not
+  at startup like `lib/env.ts`'s public vars. A misconfigured deploy would 500
+  on first page view rather than fail the build. `lib/env.ts` is scoped to
+  `NEXT_PUBLIC_*` by design; adding server-secret validation there needs a
+  small deliberate restructure — worth doing before the first real deploy that
+  sets this var.
+- [ ] The local Supabase migration set now replays from a clean database
+  (portability guard on migration 4's `rls_auto_enable()` revoke). The M1/M2
+  "deeper drag e2e once an isolated test DB exists" item above is now
+  unblocked.
+- [ ] `supabase/tests/rls_spec.sql` has 3 pre-existing assertions (rows testing
+  `private.is_admin()` / `private.has_submitted()` EXECUTE grants, and
+  `rls_auto_enable()`) that fail against a clean local stack: migration 1
+  explicitly grants `authenticated` EXECUTE on those two `private.*` helpers,
+  so the spec's stricter expectation only ever held on the remote project for
+  reasons predating M3. Investigate and reconcile (tighten the grants, or
+  correct the assertions) — out of scope for M3 since it does not touch any
+  object those three assertions exercise.
+- [ ] `RankingBoard` replaces the whole board with the locked panel rather than
+  keeping a frozen view of the actual placements — simplest for M3 (also makes
+  post-success mutation structurally impossible). Revisit if Milestone 4's
+  reveal wants to grow out of an in-place frozen board instead of a fresh fetch.
+- [x] `supabase/.branches` and `supabase/.temp` (Supabase CLI local-stack state;
+  the latter holds only fixed, non-secret local Docker demo keys) were
+  untracked but not gitignored before this milestone — added to `.gitignore`
+  during the pre-commit secret scan.

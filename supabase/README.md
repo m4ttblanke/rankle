@@ -3,14 +3,15 @@
 Migrations are the source of truth for the database. Do not make schema changes
 in the dashboard.
 
-## Migration set (apply 1→4 in order, as a set)
+## Migration set (apply 1→5 in order, as a set)
 
 | File | Creates |
 |---|---|
 | `20260909003800_core_schema.sql` | `private` schema + `app_tz()`/`today()` helpers, `profiles` (+ `handle_new_user` trigger on `auth.users`), `tierlists`, `tierlist_items`, `is_admin()`, `is_tierlist_public()`, `tier_weight()`, `tg_set_updated_at()` |
 | `20260909003851_submissions_results.sql` | `submissions`, `submission_items` (+ UPDATE-block immutability triggers), `tierlist_item_stats`, `has_submitted()`, `submit_ranking()` RPC, `get_results()` RPC |
 | `20260909003915_sharing.sql` | `shares`, `create_share()` RPC, `get_share()` RPC |
-| `20260909003945_rls_security_hardening.sql` | `enable row level security` on all 7 tables, revoke Supabase's default blanket table grants and re-grant the minimum, all RLS policies, `revoke execute` on the pre-existing `public.rls_auto_enable()` |
+| `20260909003945_rls_security_hardening.sql` | `enable row level security` on all 7 tables, revoke Supabase's default blanket table grants and re-grant the minimum, all RLS policies, `revoke execute` on the pre-existing `public.rls_auto_enable()` (guarded — see note below) |
+| `20260910170000_has_submitted_ranking.sql` | `has_submitted_ranking()` RPC (Milestone 3) — spoiler-safe boolean submission-state check for guest or registered identity |
 
 `seed.sql` is **local only** (`supabase db reset`); it is not applied to the
 remote project by `supabase db push`.
@@ -30,6 +31,11 @@ supabase start
 supabase db reset         # applies all migrations + seed.sql
 ```
 
+Reminder: a clean/local database has no `ensure_rls` event trigger (that is a
+pre-existing remote-only platform object — see migration 4's portability-guard
+comment). Any future migration that creates a table must explicitly `alter
+table ... enable row level security` itself; do not rely on auto-enable.
+
 ## Canonical timezone
 
 `America/Los_Angeles`, defined once in `private.app_tz()`. Not a Supabase
@@ -48,11 +54,26 @@ update public.profiles set is_admin = true where id = '<uuid>';
 
 ## Applied
 
-All four migrations were applied to `zhivsldkpavidxzrgtjl` on 2026-09-09 and
+Migrations 1-4 were applied to `zhivsldkpavidxzrgtjl` on 2026-09-09 and
 recorded in `supabase_migrations.schema_migrations` as `20260909003800`
 `core_schema`, `20260909003851` `submissions_results`, `20260909003915`
-`sharing`, `20260909003945` `rls_security_hardening`. The migration filenames in
-this directory match those recorded versions, so local and remote history agree.
+`sharing`, `20260909003945` `rls_security_hardening`. Migration 5
+(`has_submitted_ranking`) was applied on 2026-09-11, recorded as
+`20260911041022_has_submitted_ranking` (the Supabase migration tool timestamps
+by apply time, not the source filename's timestamp) — verified first against a
+clean local Supabase stack (SQL/RLS spec + integration tests green) before
+being applied here. The migration filenames in this directory match the
+locally-applied set; remote history additionally records migration 5 under its
+apply-time version.
+
+Note: migration 4 (`rls_security_hardening`) carries a portability guard around
+the single `revoke execute on function public.rls_auto_enable()` statement — that
+function is a remote pre-existing platform object, so a clean database (local
+`supabase start`) does not have it. The checked-in file is therefore
+intentionally not byte-identical to the body historically applied to the remote
+(which ran the bare revoke); no behaviour differs on the remote, and the set now
+replays from scratch. Migration 5 (`has_submitted_ranking`) was added for
+Milestone 3.
 Post-apply verification: structure, privileges, and a 30-assertion behavioural
 suite against the live schema all pass; advisors show only intentional-by-design
 notices (see below). No seed data; no admin bootstrapped yet.

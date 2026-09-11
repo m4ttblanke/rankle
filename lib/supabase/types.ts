@@ -326,6 +326,10 @@ export type Database = {
         Args: { p_guest_id?: string; p_token: string }
         Returns: Json
       }
+      has_submitted_ranking: {
+        Args: { p_guest_id?: string; p_tierlist_id: string }
+        Returns: boolean
+      }
       submit_ranking: {
         Args: { p_guest_id?: string; p_items: Json; p_tierlist_id: string }
         Returns: string

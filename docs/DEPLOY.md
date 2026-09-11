@@ -70,7 +70,8 @@ NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=     # the "sb_publishable_..." key
 NEXT_PUBLIC_APP_URL=                       # defaults to http://localhost:3000 if unset
 
 # Server-only — never prefix with NEXT_PUBLIC_
-SUPABASE_SERVICE_ROLE_KEY=          # bypasses RLS; unused as of Milestone 1
+SUPABASE_SERVICE_ROLE_KEY=          # bypasses RLS; unused as of Milestone 3
+GUEST_COOKIE_SECRET=                 # signs the guest identity cookie (Milestone 3)
 
 # Local design tooling only (not read by the app)
 API_KEY_21ST=
@@ -104,6 +105,25 @@ Populate required environment values.
 Then run the repository's development command.
 
 Keep exact commands in `README.md`.
+
+### Local Supabase (mutation / integration / E2E testing)
+
+Milestone 3 introduced database mutations (`submit_ranking`,
+`has_submitted_ranking`). Automated mutation tests must never run against the
+production project — they run against a local Supabase stack instead:
+
+```bash
+npm run db:start   # `supabase start` — needs Docker running
+npm run db:reset    # applies all migrations + supabase/seed.sql
+cp .env.test.example .env.test   # fill in from `npx supabase status`
+npm run test:integration          # lib/game/submit-ranking.integration.test.ts
+npm run test:e2e                  # also picks up .env.test for the dev server
+```
+
+`.env.test` is gitignored; only the `.example` file is committed. The
+integration test hard-refuses to run against any URL that is not
+`127.0.0.1`/`localhost`, even if `.env.test` is misconfigured. See
+`supabase/README.md` for the migration set and local-stack details.
 
 ---
 

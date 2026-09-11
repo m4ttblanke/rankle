@@ -1,16 +1,25 @@
 import { NoGameToday } from "@/components/game/empty-state";
 import { RankingBoard } from "@/components/game/ranking-board";
 import { getDailyGame } from "@/lib/game/get-daily-game";
+import { getGuestId } from "@/lib/game/guest";
+import { hasSubmittedRanking } from "@/lib/game/submission-state";
 
 /**
  * The daily game screen. Resolves today's game via Supabase (RLS enforces
  * release-date + publication) and renders the interactive ranking board, or the
- * empty state when nothing is live. No community/results/share data is fetched
- * here — that stays behind the post-submission spoiler gate (docs/SECURITY.md
- * sec 7). Ranking is local-only in Milestone 2: nothing is written back.
+ * empty state when nothing is live.
+ *
+ * If the current guest has already submitted an official ranking for this game,
+ * the board renders its locked state instead. That check uses the
+ * `has_submitted_ranking` RPC, which returns only a boolean — no community or
+ * results data is fetched here; that stays behind the post-submission spoiler
+ * gate (docs/SECURITY.md sec 7).
  */
 export default async function HomePage() {
   const game = await getDailyGame();
+  const alreadySubmitted = game
+    ? await hasSubmittedRanking(game.id, await getGuestId())
+    : false;
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col px-4 py-5 sm:px-6 sm:py-8">
@@ -31,7 +40,7 @@ export default async function HomePage() {
               <p className="text-sm text-muted sm:text-base">{game.prompt}</p>
             ) : null}
           </div>
-          <RankingBoard game={game} />
+          <RankingBoard game={game} alreadySubmitted={alreadySubmitted} />
         </main>
       ) : (
         <main className="flex flex-1 flex-col">

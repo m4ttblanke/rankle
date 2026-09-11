@@ -5,7 +5,15 @@ import userEvent from "@testing-library/user-event";
 import type { DailyGame } from "@/lib/game/schema";
 import { RankingBoard } from "./ranking-board";
 
-afterEach(cleanup);
+// The submit Server Action reaches the network / Next request scope; the board
+// tests only care that the CTA is wired to it and that success locks the UI.
+const submitRanking = vi.hoisted(() => vi.fn());
+vi.mock("@/app/actions/submit-ranking", () => ({ submitRanking }));
+
+afterEach(() => {
+  cleanup();
+  submitRanking.mockReset();
+});
 
 function makeGame(
   tierConfig = ["S", "A", "B", "C", "D"],
@@ -155,7 +163,7 @@ describe("<RankingBoard> reorder within a tier", () => {
 });
 
 describe("<RankingBoard> completion", () => {
-  it("ranking every item shows the completion state and NO submit control", async () => {
+  it("ranking every item shows the completion state and a submit control", async () => {
     const user = userEvent.setup();
     render(<RankingBoard game={makeGame(["S", "A"], ["a", "b", "c"])} />);
     for (const label of ["a", "b", "c"]) {
@@ -166,7 +174,143 @@ describe("<RankingBoard> completion", () => {
     expect(
       screen.getByRole("heading", { name: /unranked · 0/i }),
     ).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: /^submit ranking$/i }),
+    ).toBeTruthy();
+  });
+
+  it("no submit control while any item remains unranked", () => {
+    render(<RankingBoard game={makeGame()} />);
+    expect(screen.queryByRole("button", { name: /^submit ranking$/i })).toBeNull();
+    expect(
+      screen.getByRole("button", { name: /rank all items first/i }),
+    ).toHaveProperty("disabled", true);
+  });
+});
+
+describe("<RankingBoard> submission (Milestone 3)", () => {
+  it("confirm -> lock it in -> locked panel; ranking controls disappear", async () => {
+    submitRanking.mockResolvedValue({ ok: true });
+    const user = userEvent.setup();
+    render(<RankingBoard game={makeGame(["S", "A"], ["a", "b", "c"])} />);
+    for (const label of ["a", "b", "c"]) {
+      await user.click(card(label));
+      await user.click(pickerBtn(/^tier S$/i));
+    }
+    await user.click(screen.getByRole("button", { name: /^submit ranking$/i }));
+    await user.click(screen.getByRole("button", { name: /^lock it in$/i }));
+
+    expect(
+      await screen.findByRole("heading", { name: /ranking locked in/i }),
+    ).toBeTruthy();
+    expect(screen.queryByRole("list")).toBeNull();
     expect(screen.queryByRole("button", { name: /submit/i })).toBeNull();
+    expect(submitRanking).toHaveBeenCalledWith({
+      tierlistId: "11111111-1111-4111-8111-111111111111",
+      items: [
+        { item_id: "item-0", tier: "S", position: 0 },
+        { item_id: "item-1", tier: "S", position: 1 },
+        { item_id: "item-2", tier: "S", position: 2 },
+      ],
+    });
+  });
+
+  it("failed submission preserves the ranking and lets the player retry", async () => {
+    submitRanking.mockResolvedValueOnce({ ok: false, reason: "network" });
+    submitRanking.mockResolvedValueOnce({ ok: true });
+    const user = userEvent.setup();
+    render(<RankingBoard game={makeGame(["S", "A"], ["a", "b", "c"])} />);
+    for (const label of ["a", "b", "c"]) {
+      await user.click(card(label));
+      await user.click(pickerBtn(/^tier S$/i));
+    }
+    await user.click(screen.getByRole("button", { name: /^submit ranking$/i }));
+    await user.click(screen.getByRole("button", { name: /^lock it in$/i }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toMatch(/couldn.t reach/i);
+    // ranking still intact — every card is still placed in tier S
+    expect(cardsIn(/tier S/i)).toEqual(["a", "b", "c"]);
+
+    // "Try again" re-opens the same confirm step — every submit is confirmed
+    await user.click(screen.getByRole("button", { name: /^try again$/i }));
+    await user.click(screen.getByRole("button", { name: /^lock it in$/i }));
+    expect(
+      await screen.findByRole("heading", { name: /ranking locked in/i }),
+    ).toBeTruthy();
+    expect(submitRanking).toHaveBeenCalledTimes(2);
+  });
+
+  it("duplicate/already-submitted is treated as a locked state, not an error", async () => {
+    submitRanking.mockResolvedValue({ ok: false, reason: "already" });
+    const user = userEvent.setup();
+    render(<RankingBoard game={makeGame(["S", "A"], ["a", "b", "c"])} />);
+    for (const label of ["a", "b", "c"]) {
+      await user.click(card(label));
+      await user.click(pickerBtn(/^tier S$/i));
+    }
+    await user.click(screen.getByRole("button", { name: /^submit ranking$/i }));
+    await user.click(screen.getByRole("button", { name: /^lock it in$/i }));
+    expect(
+      await screen.findByRole("heading", { name: /you.re locked in/i }),
+    ).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("alreadySubmitted renders the locked panel directly, with no ranking controls", () => {
+    render(
+      <RankingBoard game={makeGame(["S", "A"], ["a", "b", "c"])} alreadySubmitted />,
+    );
+    expect(screen.getByRole("heading", { name: /you.re locked in/i })).toBeTruthy();
+    expect(screen.queryByRole("list")).toBeNull();
+    expect(screen.queryByRole("button", { name: /submit/i })).toBeNull();
+    expect(submitRanking).not.toHaveBeenCalled();
+  });
+
+  it("keyboard-only: Tab to Submit, Enter to confirm, Enter to lock in", async () => {
+    submitRanking.mockResolvedValue({ ok: true });
+    const user = userEvent.setup();
+    render(<RankingBoard game={makeGame(["S", "A"], ["a", "b", "c"])} />);
+    for (const label of ["a", "b", "c"]) {
+      await user.click(card(label));
+      await user.click(pickerBtn(/^tier S$/i));
+    }
+    screen.getByRole("button", { name: /^submit ranking$/i }).focus();
+    await user.keyboard("{Enter}");
+    expect(document.activeElement).toBe(
+      screen.getByRole("button", { name: /^lock it in$/i }),
+    );
+    await user.keyboard("{Enter}");
+    expect(
+      await screen.findByRole("heading", { name: /ranking locked in/i }),
+    ).toBeTruthy();
+  });
+
+  it("rapid double activation of Lock it in submits exactly once", async () => {
+    let resolveSubmit!: (v: { ok: true }) => void;
+    submitRanking.mockReturnValue(
+      new Promise((resolve) => {
+        resolveSubmit = resolve;
+      }),
+    );
+    const user = userEvent.setup();
+    render(<RankingBoard game={makeGame(["S", "A"], ["a", "b", "c"])} />);
+    for (const label of ["a", "b", "c"]) {
+      await user.click(card(label));
+      await user.click(pickerBtn(/^tier S$/i));
+    }
+    await user.click(screen.getByRole("button", { name: /^submit ranking$/i }));
+    const lockIn = screen.getByRole("button", { name: /^lock it in$/i });
+    await user.click(lockIn);
+    // the confirm button is replaced by a disabled "Submitting…" button, so a
+    // second activation has nothing left to hit
+    expect(screen.queryByRole("button", { name: /^lock it in$/i })).toBeNull();
+    expect(
+      screen.getByRole("button", { name: /submitting/i }),
+    ).toHaveProperty("disabled", true);
+    resolveSubmit({ ok: true });
+    await screen.findByRole("heading", { name: /ranking locked in/i });
+    expect(submitRanking).toHaveBeenCalledTimes(1);
   });
 });
 

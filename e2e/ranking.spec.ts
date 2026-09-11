@@ -178,7 +178,7 @@ test("reorder within a tier via the card controls", async ({ page }) => {
     .toEqual(["McDonald's", "In-N-Out", "Five Guys"]);
 });
 
-test("ranking every item shows the completion state and no submit button", async ({
+test("ranking every item shows the completion state and the submit control (Milestone 3)", async ({
   page,
 }) => {
   const tiers = ["S", "A", "B", "C", "D"];
@@ -192,7 +192,18 @@ test("ranking every item shows the completion state and no submit button", async
   }
   await expect(page.getByText(/all 10 ranked/i)).toBeVisible();
   await expect(page.getByRole("heading", { name: /unranked · 0/i })).toBeVisible();
-  await expect(page.getByRole("button", { name: /submit/i })).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: /^submit ranking$/i }),
+  ).toBeVisible();
+});
+
+test("no submit control while any item remains unranked", async ({ page }) => {
+  await expect(
+    page.getByRole("button", { name: /^submit ranking$/i }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: /rank all items first/i }),
+  ).toBeDisabled();
 });
 
 test("no network / no spoiler data while ranking", async ({ page }) => {

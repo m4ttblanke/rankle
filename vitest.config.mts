@@ -34,6 +34,7 @@ export default defineConfig({
       "lib/**/*.test.ts",
       "lib/**/*.spec.ts",
       "components/**/*.test.tsx",
+      "app/**/*.test.ts",
     ],
     passWithNoTests: true,
     env: publicEnvFromFile(),

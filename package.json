@@ -10,7 +10,11 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test"
+    "test:integration": "vitest run lib/game/submit-ranking.integration.test.ts",
+    "test:e2e": "playwright test",
+    "db:start": "npx --yes supabase start",
+    "db:stop": "npx --yes supabase stop",
+    "db:reset": "npx --yes supabase db reset"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

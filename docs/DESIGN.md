@@ -431,12 +431,36 @@ After submission:
 
 - Transition directly into the reveal experience
 
-### As built (Milestone 2)
+### As built (Milestone 3)
 
-Ranking is **local only** and there is **no submit control yet** — a real
-"Submit ranking" button arrives in Milestone 3 with `submit_ranking`. Milestone
-2 ends at the completion state: "All N ranked ✓". No affordance that looks
-actionable without working functionality.
+The submit control lives where the completion state used to sit, so the CTA
+appears exactly when it becomes possible — no disabled-looking affordance
+sitting idle beforehand.
+
+- **Incomplete:** a disabled, full-width button ("Rank all items first") holds
+  the CTA's place without inviting a click; the HUD's "N left to rank" already
+  names what remains.
+- **Ready:** a full-width accent button, Bricolage, "Submit ranking".
+- **Confirm (lightweight, no modal):** one tap swaps the button in place for
+  "Lock it in" + a secondary "Cancel", with one line of irreversible microcopy
+  ("This locks your ranking for good — no changes after."). Rearranging the
+  ranking, or pulling an item back to Unranked, drops back to the plain CTA.
+- **Submitting:** a disabled button with a small spinner and "Submitting…"; the
+  whole board goes `inert` (one attribute blocks every pointer/keyboard
+  interaction, including drag) so nothing can be changed mid-request. No
+  optimistic success.
+- **Locked (success or "already submitted"):** the entire board unmounts and is
+  replaced by a restrained panel — a check glyph, "Ranking locked in" (or
+  "You're locked in" when recognised on a later visit), one muted line ("Your
+  ranking is final — it can't be changed. Results open next."). Focus moves to
+  the panel heading. No results, no confetti, no community data — that is
+  Milestone 4.
+- **Failure:** an inline `role="alert"` message in plain language, ranking
+  untouched, the button returns to "Try again" (which re-opens the same confirm
+  step — every submit is confirmed, including a retry).
+
+No modal, no full results screen, no celebratory animation that delays the
+player.
 
 ---
 
