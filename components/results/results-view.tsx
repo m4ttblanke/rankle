@@ -5,6 +5,7 @@ import {
   isEarlyResults,
 } from "@/lib/game/results";
 import type { GameResults } from "@/lib/game/results-schema";
+import { ShareButton } from "@/components/share/share-button";
 import { CommunityTierList } from "./community-tier-list";
 import { ComparisonList } from "./comparison-list";
 import { HottestTakeCard } from "./hottest-take-card";
@@ -80,6 +81,20 @@ export function ResultsView({ results }: { results: GameResults }) {
             Come back once more players have joined for a sharper read.
           </p>
         ) : null}
+      </section>
+
+      <section aria-labelledby="share-heading" className="flex flex-col gap-3">
+        <h2
+          id="share-heading"
+          className="font-display text-xl font-extrabold text-foreground"
+        >
+          Challenge a friend
+        </h2>
+        <p className="text-sm text-muted">
+          Send today&rsquo;s {tierlist.title} — your ranking stays hidden
+          until they play.
+        </p>
+        <ShareButton submissionId={results.submissionId} gameTitle={tierlist.title} />
       </section>
     </div>
   );

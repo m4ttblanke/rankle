@@ -36,6 +36,7 @@ const validRow = {
     { item_id: "10000000-0000-0000-0000-0000000000a1", tier: "S", position: 0 },
     { item_id: "10000000-0000-0000-0000-0000000000b1", tier: "N/A", position: 0 },
   ],
+  submission_id: "20000000-0000-0000-0000-000000000001",
 };
 
 describe("resultsResponseSchema", () => {
@@ -52,6 +53,8 @@ describe("resultsResponseSchema", () => {
       { ...validRow, items: [{ ...validRow.items[0], n: -1 }] },
     ],
     ["my_ranking missing tier", { ...validRow, my_ranking: [{ item_id: validRow.my_ranking[0].item_id, position: 0 }] }],
+    ["missing submission_id", { ...validRow, submission_id: undefined }],
+    ["malformed submission_id", { ...validRow, submission_id: "not-a-uuid" }],
   ])("rejects %s", (_name, row) => {
     expect(resultsResponseSchema.safeParse(row).success).toBe(false);
   });
@@ -83,6 +86,7 @@ describe("mapResults", () => {
       { itemId: validRow.items[0].item_id, tier: "S", position: 0 },
       { itemId: validRow.items[1].item_id, tier: "N/A", position: 0 },
     ]);
+    expect(results.submissionId).toBe(validRow.submission_id);
   });
 
   it("throws on a malformed payload", () => {

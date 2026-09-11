@@ -77,11 +77,22 @@ function moveMessage(
  * intermediate "locked in" panel to keep in sync with the ranking state, so a
  * submitted ranking can never be mutated through this component at all.
  *
- * `app/page.tsx` redirects server-side to `/results` before this component
- * ever mounts for an identity that already submitted today, so this component
- * only ever needs to handle a *fresh* submission in this session.
+ * `app/page.tsx` redirects server-side to `/results` (or `/share/[token]`)
+ * before this component ever mounts for an identity that already submitted
+ * today, so this component only ever needs to handle a *fresh* submission in
+ * this session.
  */
-export function RankingBoard({ game }: { game: DailyGame }) {
+export function RankingBoard({
+  game,
+  shareToken,
+}: {
+  game: DailyGame;
+  /** An already-validated share continuation token (Milestone 5) — see
+   *  `app/page.tsx`'s `resolveShareContinuation`. `null`/`undefined` for
+   *  ordinary play. Only ever used to build `/share/${shareToken}`, never
+   *  accepted as a full URL. */
+  shareToken?: string | null;
+}) {
   const router = useRouter();
   const [state, dispatch] = useReducer(
     rankingReducer,
@@ -97,9 +108,12 @@ export function RankingBoard({ game }: { game: DailyGame }) {
 
   // Once the ranking is officially immutable, the editable board is no longer
   // a meaningful history entry — `replace` (not `push`) so back-navigation
-  // can't return the player to a stale pre-submit board.
+  // can't return the player to a stale pre-submit board. A validated share
+  // continuation sends the player straight to that reveal instead of the
+  // ordinary results page (Milestone 5) — same outcome for a fresh success
+  // and a detected duplicate, exactly like the plain `/results` case.
   function goToResults() {
-    router.replace("/results");
+    router.replace(shareToken ? `/share/${shareToken}` : "/results");
   }
 
   const itemsById = useMemo(

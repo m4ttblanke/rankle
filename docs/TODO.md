@@ -85,12 +85,13 @@ Periodically clean up old completed items.
 
 ## Sharing
 
-- [ ] Define share-record schema
-- [ ] Add unguessable share tokens
-- [ ] Build spoiler-safe share page
-- [ ] Add Web Share API
-- [ ] Add copy-link fallback
-- [ ] Add spoiler-safe OpenGraph metadata
+- [x] Define share-record schema (pre-existing since the initial migration
+  set — `shares` / `create_share` / `get_share`, unchanged by Milestone 5)
+- [x] Add unguessable share tokens (pre-existing; 32-char hex, `shares_token_len`)
+- [x] Build spoiler-safe share page (`app/share/[token]/page.tsx`)
+- [x] Add Web Share API (`components/share/share-button.tsx`)
+- [x] Add copy-link fallback
+- [x] Add spoiler-safe OpenGraph metadata (`generateMetadata`, teaser fields only)
 
 ---
 
@@ -449,3 +450,63 @@ Follow-ups it surfaced:
   `communityTierList`/`hottestTake` from the RPC response. Fine at current
   scale (see `docs/MANUAL.md` sec 32); revisit if per-item aggregate reads
   become a real cost.
+
+## Milestone 5 — spoiler-safe sharing (2026-09-11)
+
+The `shares` table + `create_share` / `get_share` RPCs already existed from
+the initial (pre-M1) migration set, already spoiler-gated, already covered by
+`supabase/tests/rls_spec.sql` (81/81, unchanged). This milestone was almost
+entirely application layer: `app/share/[token]/page.tsx` (locked gate /
+"wrapped up" / reveal, branching on `get_share`'s own `locked` flag and a
+slug comparison against `getDailyGame()`), `components/share/*`,
+`lib/game/get-share.ts`, `lib/game/share-schema.ts`,
+`lib/game/share-comparison.ts` (literal same-tier count, not a weighted
+compatibility score), and `app/actions/create-share.ts`.
+
+One migration: `20260911190000_get_results_submission_id.sql` adds a single
+additive `submission_id` field to `get_results`'s JSON output — the only way
+the client can learn its own submission id to call `create_share` (guests
+have no grant on `public.submissions`). Approved before implementation; SQL
+tested locally (81/81 RLS spec, both `get_results` integration tests) before
+being proposed for remote deployment.
+
+Share continuation (`?share=<token>` on `/`, carried from a locked
+`ShareGate`'s CTA so a fresh submission returns to the reveal instead of
+`/results`) is validated in `app/page.tsx`, not a general `returnTo`
+mechanism: shape-checked, then confirmed to correspond to *today's* live game
+via a `getShare(token, null)` call that is structurally incapable of ever
+returning ranking data (a null-guest, unauthenticated caller can never
+satisfy `get_share`'s eligibility check). The actual game submitted is always
+`getDailyGame()`'s result, independent of the token, so a foreign/old token
+can only affect the post-submit destination, never what gets submitted.
+
+Seed data (`supabase/seed.sql`, local/dev only) gained a fourth demo game —
+an already-`archived` "Retro Snacks" tierlist with a pre-seeded submission
+and a fixed share token (`deadbeefdeadbeefdeadbeefdeadbeef`) — so the
+"already wrapped up" old-link state has real fixture data to test against
+without needing admin tooling or Milestone 9's archive-gameplay feature.
+
+216 Vitest (82 new: share-schema, share-comparison, create-share action, plus
+a real-DB `get-share.integration.test.ts` mirroring the results one) + 60
+Playwright (13 new `e2e/share.spec.ts`, covering creation, the locked gate,
+continuation, duplicate-submit continuation, old/foreign-token handling, no
+open redirect, native-share + copy-fallback + cancellation, and mobile
+overflow) green, plus SQL/RLS 81/81, lint, typecheck, and a production build
+(confirms `/share/[token]` renders dynamically, `ƒ`, same as `/results` — no
+shared-cache leak path).
+
+Follow-ups it surfaced:
+
+- [ ] `ShareGate`/`ShareWrappedUp`/`InvalidShare` don't move focus to their
+  own heading on the client-side `router.replace` landing (mirrors the
+  `ResultsHeading` pattern from Milestone 4) — worth doing once real
+  screen-reader testing flags it as a problem, same deferred call as M2's
+  drag-surface note.
+- [ ] The sender re-opening their own share link before anyone else has
+  played sees their own ranking mirrored as "your ranking" (trivial 100%
+  self-agreement) — harmless (their own data, nothing new disclosed) but not
+  a polished experience. Revisit only if it turns out to confuse real users.
+- [ ] No dynamic OG image — metadata is text-only (title/description).
+  Acceptable per the M5 brief ("do NOT build a dynamic OG image rendering
+  system just for M5"); revisit if link-preview engagement data suggests it's
+  worth the cost.

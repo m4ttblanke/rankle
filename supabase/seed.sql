@@ -40,3 +40,37 @@ cross join (
     ('Monsters, Inc.', 7), ('Finding Nemo', 8), ('Cars', 9)
 ) as x(label, ord)
 where t.slug = 'pixar-movies';
+
+-- A fourth demo game, already archived (no longer "today's" game) with a
+-- pre-seeded submission + share, so e2e tests can exercise Milestone 5's
+-- "this Rankle has already wrapped up" old-link behavior without needing
+-- admin tooling or the archive-gameplay feature (Milestone 9) this milestone
+-- deliberately does not build. Inserted directly (bypassing submit_ranking),
+-- since submissions are only ever accepted for a `live` game.
+insert into public.tierlists (id, slug, title, prompt, status, release_date, tier_config)
+values
+  ('99999999-0000-0000-0000-000000000001', 'retro-snacks', 'Retro Snacks',
+   'A blast from the past.', 'archived', private.today() - 1,
+   '["S","A","B","C","F","N/A"]'::jsonb);
+
+insert into public.tierlist_items (id, tierlist_id, label, sort_order)
+values
+  ('99999999-0000-0000-0000-0000000000a1', '99999999-0000-0000-0000-000000000001', 'Dunkaroos', 0),
+  ('99999999-0000-0000-0000-0000000000a2', '99999999-0000-0000-0000-000000000001', 'Gushers', 1),
+  ('99999999-0000-0000-0000-0000000000a3', '99999999-0000-0000-0000-000000000001', 'Fruit by the Foot', 2);
+
+insert into public.submissions (id, tierlist_id, guest_id)
+values
+  ('99999999-0000-0000-0000-0000000000b1', '99999999-0000-0000-0000-000000000001',
+   '99999999-0000-0000-0000-0000000000c1');
+
+insert into public.submission_items (submission_id, tierlist_item_id, tier, position)
+values
+  ('99999999-0000-0000-0000-0000000000b1', '99999999-0000-0000-0000-0000000000a1', 'S', 0),
+  ('99999999-0000-0000-0000-0000000000b1', '99999999-0000-0000-0000-0000000000a2', 'A', 0),
+  ('99999999-0000-0000-0000-0000000000b1', '99999999-0000-0000-0000-0000000000a3', 'F', 0);
+
+insert into public.shares (token, tierlist_id, submission_id, guest_id)
+values
+  ('deadbeefdeadbeefdeadbeefdeadbeef', '99999999-0000-0000-0000-000000000001',
+   '99999999-0000-0000-0000-0000000000b1', '99999999-0000-0000-0000-0000000000c1');

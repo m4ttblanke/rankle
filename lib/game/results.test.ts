@@ -302,6 +302,7 @@ describe("isEarlyResults", () => {
     totalSubmissions: 0,
     items: [],
     myRanking: [],
+    submissionId: "11111111-1111-1111-1111-111111111111",
   };
 
   it("is early below MIN_RESPONSES_FOR_VERDICT and not at/above it", () => {

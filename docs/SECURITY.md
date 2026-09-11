@@ -222,6 +222,63 @@ A share record may contain:
 
 Server-side logic must determine what the recipient can see.
 
+**As built (Milestone 5):** the schema/RPCs described above already existed
+from the initial migration set (`supabase/migrations/20260909003915_sharing.sql`,
+pre-M1) — `supabase/tests/rls_spec.sql` already exercised the eligibility
+matrix (owner, correct guest, wrong guest, cross-identity, revoked) before
+this milestone touched anything, and still does (81/81, unchanged). M5 is the
+application layer on top of that: `getShare()` (`lib/game/get-share.ts`)
+never distinguishes a malformed token, an unknown token, a revoked share, or
+a transient failure to its caller — all four collapse to `null`, exactly like
+`getResults()` already does for its own gate (sec 7).
+
+`get_results` gained one additive field, `submission_id` — the caller's own,
+returned only after the caller already passed that RPC's existing
+eligibility gate (`supabase/migrations/20260911190000_get_results_submission_id.sql`).
+This exists solely so the client can call `create_share`, which has no
+grant to read `public.submissions` directly otherwise. `create_share`
+independently re-verifies ownership of whatever id it's given — the
+submission id is passed as untrusted client input through the `createShare`
+Server Action (`app/actions/create-share.ts`), never treated as
+self-authorizing.
+
+**Share continuation caching:** `/share/[token]` (`app/share/[token]/page.tsx`)
+legitimately renders different content for different visitors at the same
+URL — locked teaser, "wrapped up," or the full reveal — decided by
+`getGuestId()` reading `cookies()`, one of Next's Dynamic APIs. That opts the
+whole route out of the Full Route Cache / static rendering automatically
+(confirmed in the production build output — the route lists as `ƒ`
+server-rendered on demand, same as `/results`), so there is no shared/public
+cache path where one visitor's unlocked response could reach another.
+`generateMetadata` on the same route reads only `get_share`'s teaser fields
+(sender name, title, prompt) and never touches `locked`/`ranking` — the
+social preview stays spoiler-free regardless of who (or what crawler)
+requests it.
+
+**Old/foreign share tokens:** the `/?share=<token>` continuation param
+(carried from a locked `ShareGate` into gameplay so a fresh submission lands
+back on the reveal) is validated in `app/page.tsx` before it can affect
+anything — shape-checked, then confirmed to correspond to *today's* live
+game via `getShare(token, null)`. This call exists ONLY to answer "what game
+does this token represent" (compared against `getDailyGame()`'s slug) — its
+result is never serialized into a prop, rendered, or otherwise passed into
+`RankingBoard` or any other gameplay UI. Eligibility remains `get_share`'s
+own job throughout: for an identity this call doesn't unlock, it returns
+`locked: true` / `ranking: null`, exactly as it would for any other
+ineligible caller — this lookup is not, and must not become, a second
+eligibility decision made in application code. (Passing `null` rather than
+the visitor's real guest id also happens to mean that, under the current
+guest-only identity model with no sign-in flow yet, this particular call can
+never come back unlocked either — but that is a property of today's identity
+model, not something this code path relies on or that stays true once
+authenticated sessions exist; `get_share` recognizing a matching `auth.uid()`
+independently of `p_guest_id` is expected future behavior, not a bug.) A
+token that fails either check is dropped before it ever reaches
+`RankingBoard`; the game actually submitted is always `getDailyGame()`'s
+result, never anything derived from the token, so a foreign/old token cannot
+alter what gets submitted, only (when valid) where a successful submission
+lands afterward.
+
 ---
 
 ## 9. IDOR Prevention

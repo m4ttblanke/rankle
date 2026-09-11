@@ -89,6 +89,12 @@ describe.skipIf(!url || !key)("get_results (local Supabase, real data)", () => {
 
     const results = mapResults(data);
 
+    // Milestone 5: the caller's own submission id round-trips (used only to
+    // call create_share — see migration 20260911190000_get_results_submission_id.sql).
+    expect(results.submissionId).toMatch(
+      /^[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$/,
+    );
+
     // The N/A placement round-trips verbatim.
     const naEntry = results.myRanking.find((r) => r.itemId === items[0].id);
     expect(naEntry?.tier).toBe("N/A");

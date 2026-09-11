@@ -56,6 +56,12 @@ export const resultsResponseSchema = z.object({
   total_submissions: z.number().int().nonnegative(),
   items: z.array(resultsItemRowSchema),
   my_ranking: z.array(myRankingRowSchema),
+  // Milestone 5: the caller's own submission id, returned only after this
+  // caller already passed get_results()'s eligibility gate (see migration
+  // 20260911190000_get_results_submission_id.sql). Used solely to call
+  // create_share() — never rendered, never put in a URL or outbound share
+  // text (docs/SECURITY.md sec 8, sec 9).
+  submission_id: uuid,
 });
 
 export type ResultsItem = {
@@ -86,6 +92,9 @@ export type GameResults = {
   totalSubmissions: number;
   items: ResultsItem[];
   myRanking: MyRankingEntry[];
+  /** This caller's own submission id — internal use only (create_share). Not
+   *  for display, not for URLs, not an authorization mechanism on its own. */
+  submissionId: string;
 };
 
 /**
@@ -119,5 +128,6 @@ export function mapResults(raw: unknown): GameResults {
       tier: r.tier,
       position: r.position,
     })),
+    submissionId: parsed.submission_id,
   };
 }

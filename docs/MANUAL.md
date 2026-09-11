@@ -503,6 +503,66 @@ A recipient who has not played should see a prompt similar to:
 
 > Matt ranked today's Fast Food Fries list. Play to reveal his ranking.
 
+**As built (Milestone 5):** the `shares` / `create_share` / `get_share`
+schema and RPCs already existed from the initial migration set (pre-M1) —
+this milestone built the application layer on top of unchanged SQL, plus one
+additive field. `/share/[token]` (`app/share/[token]/page.tsx`) branches on
+`get_share`'s own `locked` flag: locked + the share's game is today's live
+game → `ShareGate` (spoiler-free invitation); locked + the game has since
+rotated away from being current → `ShareWrappedUp` ("this Rankle has already
+wrapped up," with a clearly separate "Play today's Rankle instead" link —
+there is no archive-gameplay route to send them into, so this never claims
+they can still play the represented game; that gap is Milestone 9's, not
+this one); unlocked → `ShareReveal`, the sender's ranking (from `get_share`)
+side by side with the recipient's own (from `get_results`, fetched only
+because eligibility is already confirmed). A malformed, unknown, or revoked
+token all render one generic `InvalidShare` state — nothing distinguishes
+them to the visitor.
+
+Share creation (`ShareButton`, `components/share/share-button.tsx`) needs the
+caller's own submission id, which the client had no way to learn (guests have
+no grant on `public.submissions`) — `get_results` now additionally returns
+`submission_id`, the caller's own, only after its existing eligibility gate
+(`supabase/migrations/20260911190000_get_results_submission_id.sql`). The
+`createShare` Server Action (`app/actions/create-share.ts`) treats that id as
+untrusted client input and forwards it to the unchanged
+`create_share(p_submission_id, p_guest_id)`, which independently
+re-verifies ownership — the id is never an authorization mechanism on its
+own. `create_share` was already idempotent (one share per submission), so a
+repeated "Share" tap reuses the same token.
+
+**Share continuation:** a locked `ShareGate`'s CTA links to `/?share=<token>`
+rather than plain `/`. `app/page.tsx` validates that token's shape and calls
+`getShare(token, null)` solely to learn which game the token represents
+(compared against `getDailyGame()`'s slug) before carrying it into
+`RankingBoard` — that result is never serialized, rendered, or otherwise
+passed into the gameplay UI, and eligibility for the reveal remains
+`get_share`'s own decision throughout (an ineligible identity still gets back
+`locked: true` / `ranking: null`, same as anywhere else it's called).
+Passing `null` rather than the visitor's real guest id also means that, with
+no sign-in flow yet, this lookup happens to never come back unlocked either —
+but that's a property of today's guest-only identity model, not a guarantee
+this code relies on; it is expected to change once authenticated sessions
+exist. A fresh success or a detected duplicate then `router.replace`s to
+`/share/[token]` instead of the ordinary `/results`; without a validated
+token, M4's plain `/results` behavior is unchanged. This is a narrow,
+internally-constructed continuation, not a general `returnTo`/open-redirect
+mechanism — no client input ever becomes the actual navigation target.
+
+**Web Share / copy fallback:** `ShareButton` uses `navigator.share` when
+available (spoiler-free message: *"I ranked today's {title}. Play yours to
+reveal mine."*), else copies the link with an accessible "Link copied"
+message — no toast dependency. Cancelling the native share sheet
+(`AbortError`) is treated as a no-op, never an error.
+
+**Comparison, not compatibility:** the reveal's "Same placement on N of M
+items" is a literal same-tier count (`lib/game/share-comparison.ts`) —
+deliberately not the weighted/persistent compatibility score sec 19
+describes for later. A shared N/A placement counts as a literal match for
+that count (both sides abstained) but is never implied to be an opinion
+agreement, and N/A rows are kept out of the S..F-ordered comparison list
+entirely, same neutral treatment as `/results` (sec 9, sec 32).
+
 ---
 
 ## 22. Internal Sharing

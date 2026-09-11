@@ -383,6 +383,69 @@ describe("<RankingBoard> submission and results handoff (Milestone 4)", () => {
   });
 });
 
+describe("<RankingBoard> share continuation (Milestone 5)", () => {
+  const TOKEN = "abcdef0123456789abcdef0123456789";
+
+  it("a fresh submission with a share token replaces the URL with /share/[token], not /results", async () => {
+    submitRanking.mockResolvedValue({ ok: true });
+    const user = userEvent.setup();
+    render(
+      <RankingBoard
+        game={makeGame(["S", "A"], ["a", "b", "c"])}
+        shareToken={TOKEN}
+      />,
+    );
+    for (const label of ["a", "b", "c"]) {
+      await user.click(card(label));
+      await user.click(pickerBtn(/^tier S$/i));
+    }
+    await user.click(screen.getByRole("button", { name: /^submit ranking$/i }));
+    await user.click(screen.getByRole("button", { name: /^lock it in$/i }));
+
+    await waitFor(() =>
+      expect(routerReplace).toHaveBeenCalledWith(`/share/${TOKEN}`),
+    );
+    expect(routerReplace).not.toHaveBeenCalledWith("/results");
+  });
+
+  it("a duplicate-submit outcome with a share token also returns to /share/[token]", async () => {
+    submitRanking.mockResolvedValue({ ok: false, reason: "already" });
+    const user = userEvent.setup();
+    render(
+      <RankingBoard
+        game={makeGame(["S", "A"], ["a", "b", "c"])}
+        shareToken={TOKEN}
+      />,
+    );
+    for (const label of ["a", "b", "c"]) {
+      await user.click(card(label));
+      await user.click(pickerBtn(/^tier S$/i));
+    }
+    await user.click(screen.getByRole("button", { name: /^submit ranking$/i }));
+    await user.click(screen.getByRole("button", { name: /^lock it in$/i }));
+
+    await waitFor(() =>
+      expect(routerReplace).toHaveBeenCalledWith(`/share/${TOKEN}`),
+    );
+  });
+
+  it("ordinary gameplay without a share token still returns to /results", async () => {
+    submitRanking.mockResolvedValue({ ok: true });
+    const user = userEvent.setup();
+    render(
+      <RankingBoard game={makeGame(["S", "A"], ["a", "b", "c"])} shareToken={null} />,
+    );
+    for (const label of ["a", "b", "c"]) {
+      await user.click(card(label));
+      await user.click(pickerBtn(/^tier S$/i));
+    }
+    await user.click(screen.getByRole("button", { name: /^submit ranking$/i }));
+    await user.click(screen.getByRole("button", { name: /^lock it in$/i }));
+
+    await waitFor(() => expect(routerReplace).toHaveBeenCalledWith("/results"));
+  });
+});
+
 describe("<RankingBoard> keyboard-only path", () => {
   it("Tab to a card, Enter opens the picker, Enter on a tier moves it", async () => {
     const user = userEvent.setup();

@@ -37,3 +37,19 @@ export function CloseIcon({ className }: IconProps) {
     </svg>
   );
 }
+
+export function CheckIcon({ className }: IconProps) {
+  return (
+    <svg {...base} className={className}>
+      <path d="M3.5 8.5l3 3 6-7" />
+    </svg>
+  );
+}
+
+export function ShareIcon({ className }: IconProps) {
+  return (
+    <svg {...base} className={className}>
+      <path d="M11.5 5.5a1.75 1.75 0 1 0-1.657-2.363l-4.146 2.28a1.75 1.75 0 1 0 0 2.966l4.146 2.28A1.75 1.75 0 1 0 11.5 9.5c-.31 0-.6.079-.854.217l-4.146-2.28a1.767 1.767 0 0 0 0-.874l4.146-2.28c.254.138.543.217.854.217Z" />
+    </svg>
+  );
+}
