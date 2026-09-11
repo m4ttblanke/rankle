@@ -44,6 +44,15 @@ async function rankEveryItem(page: Page) {
   await expect(page.getByText(/all 10 ranked/i)).toBeVisible();
 }
 
+/** After a confirmed submission (fresh or a recognised duplicate), the player
+ *  lands on the results reveal (Milestone 4) — there is no intermediate
+ *  "locked in" panel to wait for. Full results-content coverage lives in
+ *  `e2e/results.spec.ts`; this just confirms the handoff happened. */
+async function expectOnResults(page: Page) {
+  await expect(page).toHaveURL(/\/results\/?$/);
+  await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+}
+
 test.beforeEach(async ({ page }) => {
   await page.goto("/");
   await expect(
@@ -51,16 +60,13 @@ test.beforeEach(async ({ page }) => {
   ).toBeVisible();
 });
 
-test("rank all items -> submit -> confirm -> locked state", async ({ page }) => {
+test("rank all items -> submit -> confirm -> results reveal", async ({ page }) => {
   await rankEveryItem(page);
   await page.getByRole("button", { name: /^submit ranking$/i }).click();
   await expect(page.getByText(/can.t be undone|locks your ranking/i)).toBeVisible();
   await page.getByRole("button", { name: /^lock it in$/i }).click();
 
-  await expect(
-    page.getByRole("heading", { name: /ranking locked in/i }),
-  ).toBeVisible();
-  await expect(page.getByRole("list")).toHaveCount(0);
+  await expectOnResults(page);
 });
 
 test("rapid double activation of Lock it in sends exactly one submission", async ({
@@ -75,9 +81,7 @@ test("rapid double activation of Lock it in sends exactly one submission", async
   });
 
   await page.getByRole("button", { name: /^lock it in$/i }).dblclick();
-  await expect(
-    page.getByRole("heading", { name: /ranking locked in/i }),
-  ).toBeVisible();
+  await expectOnResults(page);
   expect(submitPosts).toBe(1);
 });
 
@@ -110,28 +114,22 @@ test("a failed submission preserves the ranking and allows retry", async ({
 
   await page.getByRole("button", { name: /^try again$/i }).click();
   await page.getByRole("button", { name: /^lock it in$/i }).click();
-  await expect(
-    page.getByRole("heading", { name: /ranking locked in/i }),
-  ).toBeVisible();
+  await expectOnResults(page);
 });
 
-test("refresh after a successful submission recognises the locked state", async ({
+test("revisiting / after a successful submission redirects straight to /results", async ({
   page,
 }) => {
   await rankEveryItem(page);
   await page.getByRole("button", { name: /^submit ranking$/i }).click();
   await page.getByRole("button", { name: /^lock it in$/i }).click();
-  await expect(
-    page.getByRole("heading", { name: /ranking locked in/i }),
-  ).toBeVisible();
+  await expectOnResults(page);
 
-  await page.reload();
-  await expect(
-    page.getByRole("heading", { name: /you.re locked in/i }),
-  ).toBeVisible();
-  // no ranking controls at all after refresh
-  await expect(page.getByRole("list")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: /submit/i })).toHaveCount(0);
+  // Server-side redirect (docs/SECURITY.md sec 7) — not a client re-render.
+  await page.goto("/");
+  await expectOnResults(page);
+  // no ranking controls at all — this identity can never see the board again
+  await expect(page.locator("[data-card-id]")).toHaveCount(0);
 });
 
 test("the ranking cannot be changed after a successful submission", async ({
@@ -140,15 +138,13 @@ test("the ranking cannot be changed after a successful submission", async ({
   await rankEveryItem(page);
   await page.getByRole("button", { name: /^submit ranking$/i }).click();
   await page.getByRole("button", { name: /^lock it in$/i }).click();
-  await expect(
-    page.getByRole("heading", { name: /ranking locked in/i }),
-  ).toBeVisible();
+  await expectOnResults(page);
 
   // no draggable/selectable cards remain in the document at all
   await expect(page.locator("[data-card-id]")).toHaveCount(0);
 });
 
-test("no results, community, or friend data appears before or after submission", async ({
+test("no results, community, or friend data appears before submission", async ({
   page,
 }) => {
   const forbidden = /consensus|controvers|hottest take|friends? played|% agree/i;
@@ -157,12 +153,9 @@ test("no results, community, or friend data appears before or after submission",
   await rankEveryItem(page);
   await expect(page.getByText(forbidden)).toHaveCount(0);
 
-  await page.getByRole("button", { name: /^submit ranking$/i }).click();
-  await page.getByRole("button", { name: /^lock it in$/i }).click();
-  await expect(
-    page.getByRole("heading", { name: /ranking locked in/i }),
-  ).toBeVisible();
-  await expect(page.getByText(forbidden)).toHaveCount(0);
+  // Once submitted, this data becomes legitimately visible — that's the point
+  // of the reveal (Milestone 4). Full spoiler-gate coverage (including that
+  // it stays hidden for OTHER identities) lives in e2e/results.spec.ts.
 });
 
 test("keyboard-only submission flow", async ({ page }) => {
@@ -171,9 +164,7 @@ test("keyboard-only submission flow", async ({ page }) => {
   await page.keyboard.press("Enter");
   await expect(page.getByRole("button", { name: /^lock it in$/i })).toBeFocused();
   await page.keyboard.press("Enter");
-  await expect(
-    page.getByRole("heading", { name: /ranking locked in/i }),
-  ).toBeVisible();
+  await expectOnResults(page);
 });
 
 test("mobile submission flow", async ({ page }) => {
@@ -182,9 +173,7 @@ test("mobile submission flow", async ({ page }) => {
   await rankEveryItem(page);
   await page.getByRole("button", { name: /^submit ranking$/i }).click();
   await page.getByRole("button", { name: /^lock it in$/i }).click();
-  await expect(
-    page.getByRole("heading", { name: /ranking locked in/i }),
-  ).toBeVisible();
+  await expectOnResults(page);
   const overflow = await page.evaluate(
     () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
   );

@@ -213,6 +213,15 @@ The user should quickly understand:
 - Where they strongly disagreed
 - Which item divided people most
 
+**As built (Milestone 4):** `/results` (`app/results/page.tsx`). No migration
+or RPC change — `get_results` already returned everything needed. Section
+order: community verdict -> your ranking vs. everyone else (with per-item
+distribution + consensus/controversy inline) -> your hottest take. Friend
+rankings/comparisons are not built (Friends is a later phase). A game-wide
+"Early results" framing appears below `MIN_RESPONSES_FOR_VERDICT` total
+submissions; per-item consensus/controversy fall back to "Not enough ratings
+yet" the same way, independent of the game-wide framing.
+
 ---
 
 ## 9. Aggregate Ranking
@@ -241,6 +250,16 @@ Avoid presenting this score as objective truth.
 
 The aggregate is a summary of player opinion.
 
+**As built (Milestone 4):** an item's community tier (`communityTierForAvg`,
+`lib/game/results.ts`) is whichever opinion tier's weight is nearest its
+DB-sourced `avg_weight` — that value stays the one source of truth; nothing
+recomputes it from `tier_counts`. An exact halfway average rounds to the
+HIGHER tier (tested at every boundary). An item with zero scored responses
+(`avg_weight === null`) is **Unrated**, never forced into F. All exclusion of
+`N/A` is by identity (`tier === "N/A"`), not by assuming it is the last
+`tier_config` entry — a hypothetical future scale with N/A elsewhere would
+behave identically.
+
 ---
 
 ## 10. Consensus and Controversy
@@ -257,6 +276,17 @@ Do not add machine learning or opaque scoring for this.
 
 Unit test these calculations.
 
+**As built (Milestone 4):** `consensusControversy` (`lib/game/results.ts`) —
+the variance of scored tier weights around `avg_weight`, normalized by the
+maximum possible variance for the scale (a 50/50 split at the two weight
+extremes). `controversy` rises with spread; `consensus = 1 − controversy`.
+`N/A` responses never enter the sum, checked by identity. An item with zero
+scored responses has no verdict at all (`null`, not zero — it is Unrated, not
+"maximally consensual"). Below `MIN_RESPONSES_FOR_VERDICT = 3` scored
+responses, the numbers are still computed (and unit-tested) but the UI shows
+"Not enough ratings yet" instead of a confident label — raw distribution
+counts stay visible regardless of that threshold.
+
 ---
 
 ## 11. Hottest Take
@@ -271,6 +301,17 @@ A simple implementation can compare:
 The item with the largest meaningful difference can be surfaced.
 
 Use an explainable calculation.
+
+**As built (Milestone 4):** `hottestTake` (`lib/game/results.ts`). Candidates
+are the player's non-`"N/A"` placements on items with at least
+`HOTTEST_TAKE_MIN_RESPONSES = 2` scored responses (so the comparison reflects
+at least one opinion besides the player's own); `diff = |player weight −
+avg_weight|` must clear `HOTTEST_TAKE_MIN_DIFF = 1` (a full tier) to count.
+Highest `diff` wins; ties break by the item's `sortOrder`. No eligible
+candidate yields a graceful "no hot take yet" state rather than a manufactured
+one. When the player is the sole scored response on an item, `avg_weight`
+equals their own weight exactly, so `diff` is `0` and it is excluded
+automatically — no special-casing needed to avoid disagreeing with yourself.
 
 ---
 

@@ -179,6 +179,30 @@ Eligibility should be checked server-side.
 
 Do not fetch spoiler data early and hide it in CSS or React state.
 
+**As built (Milestone 4):** two independent, server-side checks stand between
+a visitor and any result data, in `app/results/page.tsx`:
+
+1. `hasSubmittedRanking` (the same boolean-only `has_submitted_ranking` RPC
+   Milestone 3 already uses) — a cheap, spoiler-free `redirect("/")`. This is
+   UX, not authorization.
+2. `getResults` -> the `get_results` RPC (unchanged since Milestone 3) — the
+   actual authority. `SECURITY DEFINER`, raises `42501` until this identity
+   has an official submission for this game. `getResults()` treats that error
+   (or any other failure) identically: return `null`, so `/results` redirects
+   without ever distinguishing "not eligible" from "transient failure" to the
+   caller.
+
+`app/page.tsx` also redirects to `/results` server-side when it detects an
+already-submitted identity, so the ranking board never renders for someone who
+cannot use it — but that redirect is the same UX convenience as (1), not a
+security boundary; gate (2) alone is what a raw PostgREST call against
+`get_results` would still have to pass. No result-derived data is put in page
+metadata/OpenGraph on this route (sharing previews are Milestone 5). Tested for
+both a guest identity and (at the RLS/SQL level, since the app has no sign-in
+flow yet) an authenticated identity, including that one identity's submission
+never unlocks another's (`supabase/tests/rls_spec.sql`,
+`lib/game/get-results.integration.test.ts`, `e2e/results.spec.ts`).
+
 ---
 
 ## 8. Share Tokens

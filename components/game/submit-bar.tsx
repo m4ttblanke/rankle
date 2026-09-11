@@ -24,8 +24,11 @@ type Props = {
   remaining: number;
   /** Freeze the board while a submit is in flight. */
   onSubmitting: (submitting: boolean) => void;
-  /** Called once the database confirms — never optimistically. */
-  onSubmitted: (variant: "locked" | "already") => void;
+  /** Called once the database confirms an official submission exists for this
+   *  identity — either a fresh success or a detected duplicate — never
+   *  optimistically. Both outcomes mean the same thing to the caller: go to
+   *  results. */
+  onSubmitted: () => void;
 };
 
 /**
@@ -85,11 +88,11 @@ export function SubmitBar({
       inFlight.current = false;
 
       if (result.ok) {
-        onSubmitted("locked");
+        onSubmitted();
         return;
       }
       if (result.reason === "already") {
-        onSubmitted("already");
+        onSubmitted();
         return;
       }
       onSubmitting(false);

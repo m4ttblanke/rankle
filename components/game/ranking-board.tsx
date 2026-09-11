@@ -13,6 +13,7 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import {
   UNRANKED,
@@ -27,7 +28,6 @@ import { RankableCard } from "./rankable-card";
 import { RankingContainer } from "./ranking-container";
 import { SortableItem } from "./sortable-item";
 import { SubmitBar } from "./submit-bar";
-import { SubmittedPanel } from "./submitted-panel";
 
 function usePrefersReducedMotion() {
   const [reduced, setReduced] = useState(false);
@@ -72,17 +72,17 @@ function moveMessage(
  * (docs/DESIGN.md sec 2, sec 12). One `useReducer`, one `moveItem` operation;
  * pointer drag, the tap/keyboard picker, and the reorder buttons all dispatch
  * the same `MOVE`. `RankingState` stays the source of truth right up to a
- * confirmed official submission (Milestone 3), at which point the board is
- * replaced by the locked panel — so the submitted ranking can never be mutated.
+ * confirmed official submission, at which point the player is taken straight
+ * to the results reveal (Milestone 4; docs/DESIGN.md sec 15) — there is no
+ * intermediate "locked in" panel to keep in sync with the ranking state, so a
+ * submitted ranking can never be mutated through this component at all.
+ *
+ * `app/page.tsx` redirects server-side to `/results` before this component
+ * ever mounts for an identity that already submitted today, so this component
+ * only ever needs to handle a *fresh* submission in this session.
  */
-export function RankingBoard({
-  game,
-  alreadySubmitted = false,
-}: {
-  game: DailyGame;
-  /** Server-resolved: this identity already has an official submission today. */
-  alreadySubmitted?: boolean;
-}) {
+export function RankingBoard({ game }: { game: DailyGame }) {
+  const router = useRouter();
   const [state, dispatch] = useReducer(
     rankingReducer,
     game,
@@ -90,22 +90,17 @@ export function RankingBoard({
   );
   const [activeId, setActiveId] = useState<string | null>(null);
   const [liveMsg, setLiveMsg] = useState("");
-  const [submitted, setSubmitted] = useState<"locked" | "already" | null>(
-    alreadySubmitted ? "already" : null,
-  );
   const [boardFrozen, setBoardFrozen] = useState(false);
   const pendingAnnounce = useRef<{ itemId: string; to: string } | null>(null);
   const focusItemId = useRef<string | null>(null);
   const reduceMotion = usePrefersReducedMotion();
 
-  // After a submission confirmed this session, move focus to the locked panel.
-  // Not on the initial `alreadySubmitted` render — that would steal focus on
-  // load.
-  useEffect(() => {
-    if (submitted === "locked" || (submitted === "already" && !alreadySubmitted)) {
-      document.getElementById("submitted-heading")?.focus();
-    }
-  }, [submitted, alreadySubmitted]);
+  // Once the ranking is officially immutable, the editable board is no longer
+  // a meaningful history entry — `replace` (not `push`) so back-navigation
+  // can't return the player to a stale pre-submit board.
+  function goToResults() {
+    router.replace("/results");
+  }
 
   const itemsById = useMemo(
     () => new Map(game.items.map((i) => [i.id, i])),
@@ -223,10 +218,6 @@ export function RankingBoard({
 
   const activeItem = activeId ? itemsById.get(activeId) : undefined;
 
-  if (submitted) {
-    return <SubmittedPanel variant={submitted} />;
-  }
-
   return (
     <DndContext
       sensors={sensors}
@@ -327,7 +318,7 @@ export function RankingBoard({
             complete={complete}
             remaining={remaining}
             onSubmitting={setBoardFrozen}
-            onSubmitted={setSubmitted}
+            onSubmitted={goToResults}
           />
         ) : null}
       </div>

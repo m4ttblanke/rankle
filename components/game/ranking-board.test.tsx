@@ -1,18 +1,25 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { DailyGame } from "@/lib/game/schema";
 import { RankingBoard } from "./ranking-board";
 
 // The submit Server Action reaches the network / Next request scope; the board
-// tests only care that the CTA is wired to it and that success locks the UI.
+// tests only care that the CTA is wired to it and that success/duplicate both
+// navigate to the results reveal (Milestone 4).
 const submitRanking = vi.hoisted(() => vi.fn());
 vi.mock("@/app/actions/submit-ranking", () => ({ submitRanking }));
+
+const routerReplace = vi.hoisted(() => vi.fn());
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ replace: routerReplace }),
+}));
 
 afterEach(() => {
   cleanup();
   submitRanking.mockReset();
+  routerReplace.mockReset();
 });
 
 function makeGame(
@@ -198,7 +205,7 @@ describe("<RankingBoard> N/A tier (haven't tried, distinct from Unranked)", () =
     await user.click(pickerBtn(/^tier N\/A$/i));
     await user.click(screen.getByRole("button", { name: /^submit ranking$/i }));
     await user.click(screen.getByRole("button", { name: /^lock it in$/i }));
-    await screen.findByRole("heading", { name: /ranking locked in/i });
+    await waitFor(() => expect(routerReplace).toHaveBeenCalledWith("/results"));
     expect(submitRanking).toHaveBeenCalledWith({
       tierlistId: "11111111-1111-4111-8111-111111111111",
       items: [
@@ -260,8 +267,8 @@ describe("<RankingBoard> completion", () => {
   });
 });
 
-describe("<RankingBoard> submission (Milestone 3)", () => {
-  it("confirm -> lock it in -> locked panel; ranking controls disappear", async () => {
+describe("<RankingBoard> submission and results handoff (Milestone 4)", () => {
+  it("confirm -> lock it in -> replaces the URL with /results; board stays frozen", async () => {
     submitRanking.mockResolvedValue({ ok: true });
     const user = userEvent.setup();
     render(<RankingBoard game={makeGame(["S", "A"], ["a", "b", "c"])} />);
@@ -272,11 +279,15 @@ describe("<RankingBoard> submission (Milestone 3)", () => {
     await user.click(screen.getByRole("button", { name: /^submit ranking$/i }));
     await user.click(screen.getByRole("button", { name: /^lock it in$/i }));
 
+    await waitFor(() => expect(routerReplace).toHaveBeenCalledWith("/results"));
+    // `replace` (not `push`): the pre-submit board must not become a back-button
+    // destination once the ranking is immutable.
+    expect(routerReplace).toHaveBeenCalledTimes(1);
+    // Nothing can be edited while the navigation is in flight: the board stays
+    // on its disabled "Submitting…" state rather than reopening the CTA.
     expect(
-      await screen.findByRole("heading", { name: /ranking locked in/i }),
-    ).toBeTruthy();
-    expect(screen.queryByRole("list")).toBeNull();
-    expect(screen.queryByRole("button", { name: /submit/i })).toBeNull();
+      screen.getByRole("button", { name: /submitting/i }),
+    ).toHaveProperty("disabled", true);
     expect(submitRanking).toHaveBeenCalledWith({
       tierlistId: "11111111-1111-4111-8111-111111111111",
       items: [
@@ -303,13 +314,12 @@ describe("<RankingBoard> submission (Milestone 3)", () => {
     expect(alert.textContent).toMatch(/couldn.t reach/i);
     // ranking still intact — every card is still placed in tier S
     expect(cardsIn(/tier S/i)).toEqual(["a", "b", "c"]);
+    expect(routerReplace).not.toHaveBeenCalled();
 
     // "Try again" re-opens the same confirm step — every submit is confirmed
     await user.click(screen.getByRole("button", { name: /^try again$/i }));
     await user.click(screen.getByRole("button", { name: /^lock it in$/i }));
-    expect(
-      await screen.findByRole("heading", { name: /ranking locked in/i }),
-    ).toBeTruthy();
+    await waitFor(() => expect(routerReplace).toHaveBeenCalledWith("/results"));
     expect(submitRanking).toHaveBeenCalledTimes(2);
   });
 
@@ -323,20 +333,8 @@ describe("<RankingBoard> submission (Milestone 3)", () => {
     }
     await user.click(screen.getByRole("button", { name: /^submit ranking$/i }));
     await user.click(screen.getByRole("button", { name: /^lock it in$/i }));
-    expect(
-      await screen.findByRole("heading", { name: /you.re locked in/i }),
-    ).toBeTruthy();
+    await waitFor(() => expect(routerReplace).toHaveBeenCalledWith("/results"));
     expect(screen.queryByRole("alert")).toBeNull();
-  });
-
-  it("alreadySubmitted renders the locked panel directly, with no ranking controls", () => {
-    render(
-      <RankingBoard game={makeGame(["S", "A"], ["a", "b", "c"])} alreadySubmitted />,
-    );
-    expect(screen.getByRole("heading", { name: /you.re locked in/i })).toBeTruthy();
-    expect(screen.queryByRole("list")).toBeNull();
-    expect(screen.queryByRole("button", { name: /submit/i })).toBeNull();
-    expect(submitRanking).not.toHaveBeenCalled();
   });
 
   it("keyboard-only: Tab to Submit, Enter to confirm, Enter to lock in", async () => {
@@ -353,9 +351,7 @@ describe("<RankingBoard> submission (Milestone 3)", () => {
       screen.getByRole("button", { name: /^lock it in$/i }),
     );
     await user.keyboard("{Enter}");
-    expect(
-      await screen.findByRole("heading", { name: /ranking locked in/i }),
-    ).toBeTruthy();
+    await waitFor(() => expect(routerReplace).toHaveBeenCalledWith("/results"));
   });
 
   it("rapid double activation of Lock it in submits exactly once", async () => {
@@ -381,8 +377,9 @@ describe("<RankingBoard> submission (Milestone 3)", () => {
       screen.getByRole("button", { name: /submitting/i }),
     ).toHaveProperty("disabled", true);
     resolveSubmit({ ok: true });
-    await screen.findByRole("heading", { name: /ranking locked in/i });
+    await waitFor(() => expect(routerReplace).toHaveBeenCalledWith("/results"));
     expect(submitRanking).toHaveBeenCalledTimes(1);
+    expect(routerReplace).toHaveBeenCalledTimes(1);
   });
 });
 

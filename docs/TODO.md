@@ -64,15 +64,24 @@ Periodically clean up old completed items.
 
 ## Results
 
-- [ ] Add community result model
-- [ ] Add per-item tier distributions
-- [ ] Define aggregate ranking formula
-- [ ] Define consensus formula
-- [ ] Define controversy formula
-- [ ] Define hottest-take formula
-- [ ] Add unit tests for result calculations
-- [ ] Build results reveal UI
-- [ ] Enforce server-side spoiler gate
+- [x] Add community result model (`lib/game/results-schema.ts` — no RPC/schema
+  change; `get_results` already returned everything needed)
+- [x] Add per-item tier distributions (`lib/game/results.ts` `itemDistribution`;
+  N/A % uses game-wide `total_submissions`, never the item's own scored `n`)
+- [x] Define aggregate ranking formula (`communityTierForAvg` — nearest scored
+  tier to `avg_weight`, ties round to the higher tier)
+- [x] Define consensus formula (`consensusControversy` — 1 − normalized
+  variance of scored tier weights)
+- [x] Define controversy formula (same function; normalized variance itself)
+- [x] Define hottest-take formula (`hottestTake` — largest
+  `|player weight − avg_weight|` clearing both a minimum-responses and a
+  minimum-diff threshold; N/A ineligible; ties broken by `sortOrder`)
+- [x] Add unit tests for result calculations (`lib/game/results.test.ts`,
+  `lib/game/results-schema.test.ts`)
+- [x] Build results reveal UI (`app/results/page.tsx`, `components/results/`)
+- [x] Enforce server-side spoiler gate (unchanged `get_results` RPC remains the
+  authority; `/results` also redirects at the app level as a UX convenience —
+  see Milestone 4 entry below)
 
 ## Sharing
 
@@ -387,3 +396,56 @@ Follow-ups it surfaced:
   the latter holds only fixed, non-secret local Docker demo keys) were
   untracked but not gitignored before this milestone — added to `.gitignore`
   during the pre-commit secret scan.
+
+## Milestone 4 — community results (2026-09-11)
+
+No migration, no RPC change. Inspection found `get_results` (built in
+Milestone 3) already returned every field this milestone needed — `tier_counts`
+per item (generic, already includes `"N/A"`), `n`/`sum_weight`/`avg_weight`
+(already opinion-only, per the pre-M4 tier-scale correction), and the game-wide
+`total_submissions` (the correct "haven't tried %" denominator). All new work
+is application-layer: `lib/game/results-schema.ts` (Zod boundary for the RPC's
+`Json` return), `lib/game/results.ts` (pure calculations — `tierWeight`,
+`communityTierForAvg`, `communityTierList`, `itemDistribution`,
+`consensusControversy`, `hottestTake` — no Supabase import, no charting
+dependency), `lib/game/get-results.ts` (server-only reader; any failure,
+including the RPC's own `42501`, returns `null` rather than distinguishing
+"ineligible" from "error"), `app/results/page.tsx` (new route; app-level
+`hasSubmittedRanking` redirect as UX, `get_results`'s own gate as the actual
+authority), and `components/results/*` (community tier list, your-ranking-vs-
+community with inline distribution bars, hottest-take callout — reusing
+`tierStyle` rather than a new palette).
+
+Every N/A-exclusion rule is enforced by explicit identity checks
+(`tier === "N/A"`), never by assuming N/A is the last `tier_config` entry.
+Community-tier rounding ties go to the higher tier, verified at every exact
+half-integer boundary. Thresholds (`MIN_RESPONSES_FOR_VERDICT = 3`,
+`HOTTEST_TAKE_MIN_RESPONSES = 2`, `HOTTEST_TAKE_MIN_DIFF = 1`) are named
+constants in `lib/game/results.ts`, not config/infrastructure.
+
+Post-submit UX changed per Milestone 3's own forward note: `SubmittedPanel`
+and the "locked in" panel are gone. `app/page.tsx` redirects server-side to
+`/results` when the identity already submitted; `RankingBoard` calls
+`router.replace("/results")` (not `push`) on a fresh success or a detected
+duplicate, so the immutable pre-submit board can never become a back-button
+destination.
+
+134 Vitest (12 new: `results.test.ts`, `results-schema.test.ts`,
+`get-results.integration.test.ts` against real local Supabase) + 10 new
+Playwright specs (`results.spec.ts`) green, plus the full existing suite
+(SQL/RLS 81/81, e2e, lint, typecheck, build) unaffected.
+
+Follow-ups it surfaced:
+
+- [ ] The community tier list and comparison rows show item labels as plain
+  text, not the ranking board's card treatment (image thumbnail, monogram
+  badge). Revisit once item imagery exists in seed/production content —
+  today's demo items have no `image_url`, so this wasn't visually testable.
+- [ ] Consensus/controversy labels are three static buckets ("Strong
+  consensus" / "Mixed opinions" / "Controversial") on a fixed 0.25/0.6 split.
+  Revisit thresholds once real usage data exists (same spirit as the M4
+  product-threshold constants above).
+- [ ] No caching/memoization on `/results` — every view recomputes
+  `communityTierList`/`hottestTake` from the RPC response. Fine at current
+  scale (see `docs/MANUAL.md` sec 32); revisit if per-item aggregate reads
+  become a real cost.

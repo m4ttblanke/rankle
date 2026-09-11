@@ -456,18 +456,19 @@ sitting idle beforehand.
   whole board goes `inert` (one attribute blocks every pointer/keyboard
   interaction, including drag) so nothing can be changed mid-request. No
   optimistic success.
-- **Locked (success or "already submitted"):** the entire board unmounts and is
-  replaced by a restrained panel — a check glyph, "Ranking locked in" (or
-  "You're locked in" when recognised on a later visit), one muted line ("Your
-  ranking is final — it can't be changed. Results open next."). Focus moves to
-  the panel heading. No results, no confetti, no community data — that is
-  Milestone 4.
+- **Success or "already submitted" (Milestone 4):** no intermediate locked
+  panel — the player is taken straight into the results reveal via
+  `router.replace("/results")` (`replace`, not `push`: once the ranking is
+  immutable, the pre-submit board is not a meaningful back-button
+  destination). `app/page.tsx` does the equivalent server-side (`redirect`)
+  for an identity recognised as already-submitted on a later visit, so the
+  board never even mounts in that case.
 - **Failure:** an inline `role="alert"` message in plain language, ranking
   untouched, the button returns to "Try again" (which re-opens the same confirm
   step — every submit is confirmed, including a retry).
 
-No modal, no full results screen, no celebratory animation that delays the
-player.
+No modal, no celebratory animation that delays the player — the results page
+itself (sec 16) is the reveal moment.
 
 ---
 
@@ -493,6 +494,19 @@ Good reveal moments may include:
 
 Keep animations short.
 
+### As built (Milestone 4)
+
+`app/results/page.tsx` + `components/results/`. Server-rendered — the data is
+already fetched and spoiler-gated before this component tree runs, so no
+client-side fetch, loading spinner, or Motion is needed for the reveal itself
+(no "concrete interaction" justified adding Motion here; see sec 21). Section
+order: community verdict -> your ranking vs. everyone else (per-item
+distribution + consensus/controversy folded inline, not a separate dashboard
+section) -> your hottest take. The one client island is the `<h1>` itself
+(`ResultsHeading`), which moves focus to itself on mount — necessary because
+arriving here is a client-side `router.replace`, not a full page load, so the
+browser does not reset focus on its own.
+
 ---
 
 ## 17. Community Visualization
@@ -506,6 +520,17 @@ Per-item distributions may use:
 - Small distribution rows
 
 Do not use complex charts when simpler tier visuals communicate better.
+
+### As built (Milestone 4)
+
+The community tier list (`CommunityTierList`) reuses the ranking board's own
+visual language — a `tierStyle` letter chip + lane per row — rather than a new
+palette; it is a read-only echo of the same board the player just used, not a
+different visual system. Per-item distributions (`DistributionBar`) are a
+plain CSS segmented bar (no charting dependency) over the scored tiers only;
+`"N/A"` is deliberately never appended as a trailing segment on that bar (that
+would read as a sixth, worse-than-F quality level) — it renders as its own
+separate "X% haven't tried it" line instead.
 
 ---
 
