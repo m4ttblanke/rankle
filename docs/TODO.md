@@ -42,7 +42,8 @@ Periodically clean up old completed items.
 - [x] Choose display font (Bricolage Grotesque)
 - [x] Choose interface font (Hanken Grotesk)
 - [x] Define base color tokens (OKLCH, `app/globals.css`)
-- [x] Define S/A/B/C/D tier colors (provisional; AA-verified; review after first board — done)
+- [x] Define S/A/B/C/F tier colors (provisional; AA-verified; review after first board — done)
+- [x] Corrected default tier scale from S/A/B/C/D to S/A/B/C/F/N/A pre-M4 (N/A = "haven't tried," excluded from `tier_weight`/`sum_weight`/`total_submissions` in `submit_ranking` so it can never score as worse than F; `N/A` uses the NEUTRAL fallback in `tierStyle`, no dedicated tokens)
 - [x] Define basic radius/surface system
 - [x] Update `DESIGN.md` with approved decisions
 - [x] Build first responsive daily-game layout (read-only tier board; verified 320–430px)

@@ -23,8 +23,8 @@ type Props = {
  * A droppable container used for BOTH the unranked pool and every tier lane.
  * A tier lane carries a whisper of its own colour (`tierStyle(label).lane`) so
  * the board reads as a board, not a table; the pool is a distinctly plainer
- * holding area. Standard S–D get their palette; custom tier labels get a
- * functional neutral treatment.
+ * holding area. Standard S/A/B/C/F get their palette; N/A and any custom tier
+ * label get a functional neutral treatment.
  */
 export function RankingContainer({
   id,
@@ -91,7 +91,9 @@ export function RankingContainer({
   return (
     <section aria-label={`Tier ${label}`} className="flex items-stretch gap-2">
       <span
-        className={`grid min-h-14 w-12 shrink-0 place-items-center rounded-xl border-2 font-display text-xl font-extrabold ${st.chip}`}
+        className={`grid min-h-14 min-w-12 shrink-0 place-items-center rounded-xl border-2 px-1 font-display font-extrabold ${
+          label.length > 1 ? "text-sm" : "text-xl"
+        } ${st.chip}`}
       >
         <span className="sr-only">Tier </span>
         {label}

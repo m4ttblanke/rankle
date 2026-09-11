@@ -10,13 +10,13 @@ insert into public.tierlists (slug, title, prompt, status, release_date, tier_co
 values
   ('fast-food-fries', 'Fast Food Fries',
    'Rank the fries. No fence-sitting.', 'live', private.today(),
-   '["S","A","B","C","D"]'::jsonb),
+   '["S","A","B","C","F","N/A"]'::jsonb),
   ('pixar-movies', 'Pixar Movies',
    'Rank Pixar''s feature films.', 'scheduled', private.today() + 1,
-   '["S","A","B","C","D"]'::jsonb),
+   '["S","A","B","C","F","N/A"]'::jsonb),
   ('breakfast-foods', 'Breakfast Foods',
    'The most important ranking of the day.', 'draft', null,
-   '["S","A","B","C","D"]'::jsonb);
+   '["S","A","B","C","F","N/A"]'::jsonb);
 
 insert into public.tierlist_items (tierlist_id, label, sort_order)
 select t.id, x.label, x.ord

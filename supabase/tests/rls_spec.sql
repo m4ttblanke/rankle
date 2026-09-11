@@ -147,28 +147,38 @@ update public.profiles set is_admin = true where id = 'aaaaaaaa-0000-0000-0000-0
 insert into public.tierlists (id, slug, title, status, release_date, tier_config, created_by)
 values
   ('11111111-1111-1111-1111-111111111111', 'live-game', 'Live Game', 'live',
-   private.today(), '["S","A","B","C","D"]'::jsonb, 'aaaaaaaa-0000-0000-0000-000000000001'),
+   private.today(), '["S","A","B","C","F","N/A"]'::jsonb, 'aaaaaaaa-0000-0000-0000-000000000001'),
   ('22222222-2222-2222-2222-222222222222', 'future-game', 'Future Game', 'scheduled',
-   private.today() + 30, '["S","A","B","C","D"]'::jsonb, 'aaaaaaaa-0000-0000-0000-000000000001'),
+   private.today() + 30, '["S","A","B","C","F","N/A"]'::jsonb, 'aaaaaaaa-0000-0000-0000-000000000001'),
   ('33333333-3333-3333-3333-333333333333', 'teardown-game', 'Teardown Game', 'live',
-   private.today() - 1, '["S","A","B","C","D"]'::jsonb, 'aaaaaaaa-0000-0000-0000-000000000001');
+   private.today() - 1, '["S","A","B","C","F","N/A"]'::jsonb, 'aaaaaaaa-0000-0000-0000-000000000001'),
+  ('44444444-4444-4444-4444-444444444444', 'na-game', 'NA Game', 'live',
+   private.today() - 2, '["S","A","B","C","F","N/A"]'::jsonb, 'aaaaaaaa-0000-0000-0000-000000000001');
 
 insert into public.tierlist_items (id, tierlist_id, label, sort_order) values
   ('10000000-0000-0000-0000-0000000000a1', '11111111-1111-1111-1111-111111111111', 'Item A', 0),
   ('10000000-0000-0000-0000-0000000000b1', '11111111-1111-1111-1111-111111111111', 'Item B', 1),
   ('10000000-0000-0000-0000-0000000000c1', '11111111-1111-1111-1111-111111111111', 'Item C', 2),
   ('20000000-0000-0000-0000-0000000000a2', '22222222-2222-2222-2222-222222222222', 'Future Item', 0),
-  ('30000000-0000-0000-0000-0000000000a3', '33333333-3333-3333-3333-333333333333', 'Teardown Item', 0);
+  ('30000000-0000-0000-0000-0000000000a3', '33333333-3333-3333-3333-333333333333', 'Teardown Item', 0),
+  ('40000000-0000-0000-0000-0000000000a4', '44444444-4444-4444-4444-444444444444', 'NA Item A', 0),
+  ('40000000-0000-0000-0000-0000000000b4', '44444444-4444-4444-4444-444444444444', 'NA Item B', 1);
 
 -- =====================================================================
 -- 1. private helpers behave; direct client calls are blocked
 -- =====================================================================
 do $$
 begin
-  perform pg_temp.rec('tier_weight S/D/Z = 5/1/0',
-    private.tier_weight('["S","A","B","C","D"]'::jsonb, 'S') = 5
-    and private.tier_weight('["S","A","B","C","D"]'::jsonb, 'D') = 1
-    and private.tier_weight('["S","A","B","C","D"]'::jsonb, 'Z') = 0);
+  perform pg_temp.rec('tier_weight S/F/Z = 6/2/0',
+    private.tier_weight('["S","A","B","C","F","N/A"]'::jsonb, 'S') = 6
+    and private.tier_weight('["S","A","B","C","F","N/A"]'::jsonb, 'F') = 2
+    and private.tier_weight('["S","A","B","C","F","N/A"]'::jsonb, 'Z') = 0);
+  -- tier_weight itself is purely positional and does NOT know "N/A" is
+  -- special (it would return 1 here, one below F's 2) -- the exclusion from
+  -- sum_weight/total_submissions happens in submit_ranking, not here. See
+  -- section 4c below for the behavior that actually matters.
+  perform pg_temp.rec('tier_weight is positional-only; N/A exclusion is submit_ranking''s job, not tier_weight''s',
+    private.tier_weight('["S","A","B","C","F","N/A"]'::jsonb, 'N/A') = 1);
   perform pg_temp.rec('is_tierlist_public: live=true future=false',
     private.is_tierlist_public('11111111-1111-1111-1111-111111111111')
     and not private.is_tierlist_public('22222222-2222-2222-2222-222222222222'));
@@ -282,13 +292,13 @@ select pg_temp.expect_ok('guest submit (valid)', 'anon', null,
   'select public.submit_ranking(''11111111-1111-1111-1111-111111111111'',
      ''[{"item_id":"10000000-0000-0000-0000-0000000000a1","tier":"S","position":0},
         {"item_id":"10000000-0000-0000-0000-0000000000b1","tier":"A","position":0},
-        {"item_id":"10000000-0000-0000-0000-0000000000c1","tier":"D","position":0}]''::jsonb,
+        {"item_id":"10000000-0000-0000-0000-0000000000c1","tier":"F","position":0}]''::jsonb,
      ''0f000000-0000-0000-0000-000000000001'')');
 
 do $$
 begin
-  perform pg_temp.rec('aggregate after 1 submission: A={S:1} total=1 weight=5',
-    (select tier_counts = '{"S": 1}'::jsonb and total_submissions = 1 and sum_weight = 5
+  perform pg_temp.rec('aggregate after 1 submission: A={S:1} total=1 weight=6',
+    (select tier_counts = '{"S": 1}'::jsonb and total_submissions = 1 and sum_weight = 6
      from public.tierlist_item_stats where tierlist_item_id = '10000000-0000-0000-0000-0000000000a1'));
 end;
 $$;
@@ -298,7 +308,7 @@ select pg_temp.expect_err('guest cannot submit twice', 'anon', null,
   'select public.submit_ranking(''11111111-1111-1111-1111-111111111111'',
      ''[{"item_id":"10000000-0000-0000-0000-0000000000a1","tier":"S","position":0},
         {"item_id":"10000000-0000-0000-0000-0000000000b1","tier":"A","position":0},
-        {"item_id":"10000000-0000-0000-0000-0000000000c1","tier":"D","position":0}]''::jsonb,
+        {"item_id":"10000000-0000-0000-0000-0000000000c1","tier":"F","position":0}]''::jsonb,
      ''0f000000-0000-0000-0000-000000000001'')', '23505');
 
 -- payload validation (all as a fresh guest 2 so identity is fine)
@@ -353,7 +363,7 @@ select pg_temp.expect_err('reject: no identity (anon + null guest)', 'anon', nul
 do $$
 begin
   perform pg_temp.rec('transactional: failed submissions did NOT change aggregates',
-    (select tier_counts = '{"S": 1}'::jsonb and total_submissions = 1 and sum_weight = 5
+    (select tier_counts = '{"S": 1}'::jsonb and total_submissions = 1 and sum_weight = 6
      from public.tierlist_item_stats where tierlist_item_id = '10000000-0000-0000-0000-0000000000a1'));
   perform pg_temp.rec('transactional: no partial submission rows for guest 2',
     (select count(*) = 0 from public.submissions where guest_id = '0f000000-0000-0000-0000-000000000002'));
@@ -376,12 +386,54 @@ select pg_temp.expect_err('registered user cannot submit twice', 'authenticated'
 
 do $$
 begin
-  perform pg_temp.rec('aggregate after 2 submissions: A={S:2} total=2 weight=10',
-    (select tier_counts = '{"S": 2}'::jsonb and total_submissions = 2 and sum_weight = 10
+  perform pg_temp.rec('aggregate after 2 submissions: A={S:2} total=2 weight=12',
+    (select tier_counts = '{"S": 2}'::jsonb and total_submissions = 2 and sum_weight = 12
      from public.tierlist_item_stats where tierlist_item_id = '10000000-0000-0000-0000-0000000000a1'));
-  perform pg_temp.rec('aggregate C = {D:1,B:1} total=2 weight=4',
-    (select tier_counts = '{"B": 1, "D": 1}'::jsonb and total_submissions = 2 and sum_weight = 4
+  perform pg_temp.rec('aggregate C = {F:1,B:1} total=2 weight=6',
+    (select tier_counts = '{"B": 1, "F": 1}'::jsonb and total_submissions = 2 and sum_weight = 6
      from public.tierlist_item_stats where tierlist_item_id = '10000000-0000-0000-0000-0000000000c1'));
+end;
+$$;
+
+-- =====================================================================
+-- 4c. "N/A" tier: valid, complete, and excluded from the numeric aggregate
+--     (isolated on its own game so it never perturbs live-game's
+--     total_submissions counts, which sections 4b/6 rely on).
+-- =====================================================================
+select pg_temp.expect_ok('N/A submit (valid, complete)', 'anon', null,
+  'select public.submit_ranking(''44444444-4444-4444-4444-444444444444'',
+     ''[{"item_id":"40000000-0000-0000-0000-0000000000a4","tier":"N/A","position":0},
+        {"item_id":"40000000-0000-0000-0000-0000000000b4","tier":"S","position":0}]''::jsonb,
+     ''0f000000-0000-0000-0000-000000000005'')');
+
+do $$
+begin
+  perform pg_temp.rec('N/A placement: tier_counts records it, but total_submissions/sum_weight stay 0',
+    (select tier_counts = '{"N/A": 1}'::jsonb and total_submissions = 0 and sum_weight = 0
+     from public.tierlist_item_stats where tierlist_item_id = '40000000-0000-0000-0000-0000000000a4'));
+  perform pg_temp.rec('an S placement in the same submission still counts normally (weight=6)',
+    (select tier_counts = '{"S": 1}'::jsonb and total_submissions = 1 and sum_weight = 6
+     from public.tierlist_item_stats where tierlist_item_id = '40000000-0000-0000-0000-0000000000b4'));
+end;
+$$;
+
+-- a second submission stacks the N/A count without ever touching
+-- total_submissions/sum_weight -- proves it is not a one-off skip but a
+-- standing exclusion.
+select pg_temp.expect_ok('second N/A submit (different guest)', 'anon', null,
+  'select public.submit_ranking(''44444444-4444-4444-4444-444444444444'',
+     ''[{"item_id":"40000000-0000-0000-0000-0000000000a4","tier":"N/A","position":0},
+        {"item_id":"40000000-0000-0000-0000-0000000000b4","tier":"F","position":0}]''::jsonb,
+     ''0f000000-0000-0000-0000-000000000006'')');
+
+do $$
+begin
+  perform pg_temp.rec('N/A count accumulates across submissions; total/weight stay 0 (never worse than F)',
+    (select tier_counts = '{"N/A": 2}'::jsonb and total_submissions = 0 and sum_weight = 0
+     from public.tierlist_item_stats where tierlist_item_id = '40000000-0000-0000-0000-0000000000a4'));
+  perform pg_temp.rec('opinion tiers on the other item accumulate normally: S,F total=2 weight=8',
+    (select tier_counts = '{"S": 1, "F": 1}'::jsonb and total_submissions = 2 and sum_weight = 8
+     from public.tierlist_item_stats where tierlist_item_id = '40000000-0000-0000-0000-0000000000b4'));
 end;
 $$;
 

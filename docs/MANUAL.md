@@ -85,7 +85,17 @@ Initial standard tiers:
 - A
 - B
 - C
-- D
+- F
+- N/A
+
+S/A/B/C/F are opinion tiers. `N/A` means "I haven't tried or experienced this,
+so I can't give it an appropriate ranking" — it is an intentional final
+placement (counts as ranked, allows submission, is immutable once submitted),
+but it is not an opinion and must never be scored as though it were a tier
+below F. See sec 9 and sec 32 for how aggregates keep that distinction.
+
+`N/A` is NOT the same as "Unranked": Unranked means the player has not decided
+yet, does not count toward completion, and blocks submission.
 
 The schema may support configurable tiers if doing so remains simple.
 
@@ -209,13 +219,21 @@ The user should quickly understand:
 
 A simple aggregate ranking can be computed from per-tier counts.
 
-Example numeric tier weights:
+Example numeric tier weights (`private.tier_weight`, positional by
+`tier_config` order):
 
-- S = 5
-- A = 4
-- B = 3
-- C = 2
-- D = 1
+- S = 6
+- A = 5
+- B = 4
+- C = 3
+- F = 2
+
+`N/A` has no numeric weight and is excluded entirely from this aggregate: a
+placement of `N/A` never contributes to `sum_weight` or the submission count
+`avg_weight` divides by, so it can never pull the average toward, or below, F.
+It is tracked separately (per-item `tier_counts["N/A"]`) so a future result can
+report something like "18% haven't tried this" without touching the opinion
+average. See sec 32.
 
 The exact formula should be documented near its implementation.
 
@@ -387,7 +405,7 @@ Friend comparison may show:
 - Agreement percentage
 - Largest disagreements
 - Shared S-tier items
-- Shared D-tier items
+- Shared F-tier items
 
 Keep this visually fun and concise.
 
@@ -657,6 +675,12 @@ Do not create tables before their features require them.
 As usage grows, avoid recalculating every community result from all historical submission rows on each request.
 
 A stats table may store counts by tier per item.
+
+`N/A` counts are stored in that same per-tier structure but are excluded from
+any numeric-average column (`tierlist_item_stats.sum_weight` /
+`total_submissions`, see `public.submit_ranking`): an abstention must never
+silently join the opinion average as though it were a real (and unusually low)
+tier value.
 
 Updates must be transaction-safe and idempotent.
 

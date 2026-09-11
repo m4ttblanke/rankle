@@ -21,7 +21,7 @@ const ITEMS = [
   "Popeyes Cajun fries",
   "Culver's",
 ];
-const TIERS = ["S", "A", "B", "C", "D"];
+const TIERS = ["S", "A", "B", "C", "F", "N/A"];
 
 function escapeRe(s: string) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -36,7 +36,9 @@ async function rankEveryItem(page: Page) {
     await cardButton(page, label).click();
     await page
       .getByRole("group", { name: new RegExp(`move ${escapeRe(label)}`, "i") })
-      .getByRole("button", { name: new RegExp(`^tier ${TIERS[i % 5]}$`, "i") })
+      .getByRole("button", {
+        name: new RegExp(`^tier ${TIERS[i % TIERS.length]}$`, "i"),
+      })
       .click();
   }
   await expect(page.getByText(/all 10 ranked/i)).toBeVisible();

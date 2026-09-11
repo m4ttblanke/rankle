@@ -1,7 +1,10 @@
 /**
- * Tier label -> Tailwind classes. Standard S/A/B/C/D use the tier token palette;
- * any other (custom) tier label falls back to a neutral treatment and stays
- * fully functional. Nothing outside this file branches on the literal values.
+ * Tier label -> Tailwind classes. Standard S/A/B/C/F use the tier token palette;
+ * any other label falls back to a neutral treatment and stays fully functional.
+ * "N/A" is deliberately left OUT of `KNOWN` so it gets that same NEUTRAL
+ * fallback: N/A is "haven't tried" (an abstention), not a bad opinion, so it
+ * must read as neutral/unrated rather than as a worse tier than F. Nothing
+ * outside this file branches on the literal values.
  */
 
 export type TierStyle = {
@@ -40,11 +43,11 @@ const KNOWN: Record<string, TierStyle> = {
     lane: "bg-tier-c/[0.05]",
     laneOver: "bg-tier-c/[0.12] ring-2 ring-tier-c-border",
   },
-  D: {
-    chip: "bg-tier-d text-tier-d-foreground border-tier-d-border",
-    bar: "border-l-tier-d-border",
-    lane: "bg-tier-d/[0.05]",
-    laneOver: "bg-tier-d/[0.12] ring-2 ring-tier-d-border",
+  F: {
+    chip: "bg-tier-f text-tier-f-foreground border-tier-f-border",
+    bar: "border-l-tier-f-border",
+    lane: "bg-tier-f/[0.05]",
+    laneOver: "bg-tier-f/[0.12] ring-2 ring-tier-f-border",
   },
 };
 

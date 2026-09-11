@@ -62,7 +62,9 @@ export function MovePicker({
             aria-label={`Tier ${tier}`}
             aria-current={current || undefined}
             onClick={() => onMove(tier)}
-            className={`grid size-9 place-items-center rounded-md border-2 font-display text-base font-extrabold ${st.chip} ${
+            className={`grid h-9 min-w-9 place-items-center rounded-md border-2 px-1.5 font-display font-extrabold ${
+              tier.length > 1 ? "text-xs" : "text-base"
+            } ${st.chip} ${
               current ? "ring-2 ring-foreground/40 ring-offset-1 ring-offset-surface" : ""
             }`}
           >

@@ -13,7 +13,7 @@ const validRow = {
   title: "Fast Food Fries",
   prompt: "Rank the fries. No fence-sitting.",
   release_date: "2026-09-08",
-  tier_config: ["S", "A", "B", "C", "D"],
+  tier_config: ["S", "A", "B", "C", "F", "N/A"],
   tierlist_items: [
     { id: "10000000-0000-0000-0000-0000000000c1", label: "In-N-Out", image_url: null, sort_order: 2 },
     { id: "10000000-0000-0000-0000-0000000000a1", label: "McDonald's", image_url: "https://x/i.png", sort_order: 0 },
@@ -30,7 +30,7 @@ describe("mapDailyGame", () => {
       title: "Fast Food Fries",
       prompt: "Rank the fries. No fence-sitting.",
       releaseDate: "2026-09-08",
-      tierConfig: ["S", "A", "B", "C", "D"],
+      tierConfig: ["S", "A", "B", "C", "F", "N/A"],
     });
     expect(game.items.map((i) => i.label)).toEqual([
       "McDonald's",
@@ -75,6 +75,12 @@ describe("schema pieces", () => {
     expect(tierConfigSchema.safeParse(["S", "A"]).success).toBe(true);
     expect(tierConfigSchema.safeParse(["S"]).success).toBe(false);
     expect(tierConfigSchema.safeParse([]).success).toBe(false);
+  });
+
+  it("tierConfigSchema accepts the canonical S/A/B/C/F/N/A scale", () => {
+    expect(
+      tierConfigSchema.safeParse(["S", "A", "B", "C", "F", "N/A"]).success,
+    ).toBe(true);
   });
 
   it("dailyGameRowSchema is exported and usable", () => {

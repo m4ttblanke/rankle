@@ -14,7 +14,7 @@ import {
 } from "./ranking";
 
 function makeGame(
-  tierConfig: string[] = ["S", "A", "B", "C", "D"],
+  tierConfig: string[] = ["S", "A", "B", "C", "F", "N/A"],
   itemLabels: string[] = ["a", "b", "c", "d"],
 ): DailyGame {
   return {
@@ -132,8 +132,8 @@ describe("moveItem", () => {
       ["item-a", "B"],
       ["item-c", "S"],
       ["item-b", UNRANKED],
-      ["item-d", "D"],
-      ["item-a", "D"],
+      ["item-d", "N/A"],
+      ["item-a", "N/A"],
     ];
     for (const [itemId, to] of moves) s = moveItem(s, { itemId, to });
     const all = Object.values(s.placement).flat();
@@ -190,9 +190,52 @@ describe("rankingReducer", () => {
   });
 });
 
+describe("N/A tier (haven't tried / abstention, distinct from Unranked)", () => {
+  it("is a valid destination and counts toward completion, unlike Unranked", () => {
+    let s = createInitialRanking(game); // 4 items, tierConfig S,A,B,C,F,N/A
+    expect(isComplete(s)).toBe(false);
+    s = moveItem(s, { itemId: "item-a", to: "N/A" });
+    s = moveItem(s, { itemId: "item-b", to: "S" });
+    s = moveItem(s, { itemId: "item-c", to: "N/A" });
+    s = moveItem(s, { itemId: "item-d", to: "N/A" });
+    expect(unrankedCount(s)).toBe(0);
+    expect(isComplete(s)).toBe(true); // N/A ranked the item; it is not Unranked
+  });
+
+  it("preserves ordering within N/A like any other tier", () => {
+    let s = createInitialRanking(game);
+    for (const id of ["item-d", "item-c", "item-a"]) {
+      s = moveItem(s, { itemId: id, to: "N/A" });
+    }
+    expect(ids(s, "N/A")).toEqual(["item-d", "item-c", "item-a"]);
+    s = moveItem(s, { itemId: "item-c", to: "N/A", toIndex: 0 });
+    expect(ids(s, "N/A")).toEqual(["item-c", "item-d", "item-a"]);
+  });
+
+  it("moves from N/A to another tier and back to Unranked", () => {
+    let s = moveItem(createInitialRanking(game), { itemId: "item-a", to: "N/A" });
+    expect(findContainer(s, "item-a")).toBe("N/A");
+    s = moveItem(s, { itemId: "item-a", to: "B" });
+    expect(findContainer(s, "item-a")).toBe("B");
+    expect(ids(s, "N/A")).toEqual([]);
+    s = moveItem(s, { itemId: "item-a", to: UNRANKED });
+    expect(findContainer(s, "item-a")).toBe(UNRANKED);
+  });
+
+  it("toSubmissionPayload emits tier: \"N/A\" verbatim, in tierConfig order", () => {
+    let s = createInitialRanking(game);
+    s = moveItem(s, { itemId: "item-a", to: "S" });
+    s = moveItem(s, { itemId: "item-b", to: "N/A" });
+    expect(toSubmissionPayload(s, game)).toEqual([
+      { item_id: "item-a", tier: "S", position: 0 },
+      { item_id: "item-b", tier: "N/A", position: 0 },
+    ]);
+  });
+});
+
 describe("toSubmissionPayload", () => {
   it("derives one row per placed item, tier order following tierConfig", () => {
-    let s = createInitialRanking(game); // tierConfig S,A,B,C,D
+    let s = createInitialRanking(game); // tierConfig S,A,B,C,F,N/A
     s = moveItem(s, { itemId: "item-a", to: "A" });
     s = moveItem(s, { itemId: "item-b", to: "S" });
     s = moveItem(s, { itemId: "item-c", to: "A" });

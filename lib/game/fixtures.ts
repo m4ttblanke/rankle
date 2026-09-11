@@ -12,7 +12,7 @@ export const SAMPLE_DAILY_GAME: DailyGame = {
   title: "Fast Food Fries",
   prompt: "Rank the fries. No fence-sitting.",
   releaseDate: "2026-09-08",
-  tierConfig: ["S", "A", "B", "C", "D"],
+  tierConfig: ["S", "A", "B", "C", "F", "N/A"],
   items: [
     "McDonald's",
     "Five Guys",

@@ -62,7 +62,7 @@ function contrastRatio(
 
 const css = readFileSync(join(process.cwd(), "app/globals.css"), "utf8");
 const T = parseRootTokens(css);
-const TIERS = ["s", "a", "b", "c", "d"] as const;
+const TIERS = ["s", "a", "b", "c", "f"] as const;
 
 describe("design tokens: WCAG contrast", () => {
   it("parses every expected token from globals.css", () => {
@@ -107,5 +107,18 @@ describe("design tokens: WCAG contrast", () => {
     expect(
       contrastRatio(T[`--tier-${t}-border`], T["--background"]),
     ).toBeGreaterThanOrEqual(3.0);
+  });
+
+  // "N/A" (haven't tried) has no --tier-na-* tokens: it deliberately reuses
+  // tierStyle's NEUTRAL fallback (surface-muted fill, foreground label text)
+  // so it reads as "not rated" rather than a tier below F. Unlike the lettered
+  // tiers, NEUTRAL carries no distinct saturated border — its hairline
+  // `--border` is the same subtle divider used elsewhere in the app, not a
+  // tier-identifying signal, so it is not held to the tiers' 3:1 UI-outline
+  // bar; identification there rests on the "N/A" label text instead.
+  it("N/A's neutral fallback: label text on fill >= 4.5:1", () => {
+    expect(
+      contrastRatio(T["--foreground"], T["--surface-muted"]),
+    ).toBeGreaterThanOrEqual(4.5);
   });
 });

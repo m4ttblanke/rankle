@@ -29,7 +29,11 @@
   --accent: oklch(0.55 0.21 350);
   --accent-foreground: oklch(0.99 0.01 350);
 
-  /* --- tier ramp: warm (S) -> cool (D). fill / label-on-fill / outline --- */
+  /* --- tier ramp: warm (S) -> cool (F). fill / label-on-fill / outline ---
+     "N/A" (haven't tried) intentionally has NO dedicated tokens here: it is an
+     opinion abstention, not a low opinion, so it gets tier-style.ts's NEUTRAL
+     fallback (--surface-muted / --foreground / --border) instead of a spot on
+     this ramp. Do not add --tier-na-* tokens without revisiting that call. */
   --tier-s: oklch(0.55 0.2 25);
   --tier-s-foreground: oklch(0.99 0.02 25);
   --tier-s-border: oklch(0.42 0.17 25);
@@ -46,9 +50,9 @@
   --tier-c-foreground: oklch(0.99 0.02 150);
   --tier-c-border: oklch(0.4 0.11 150);
 
-  --tier-d: oklch(0.52 0.13 245);
-  --tier-d-foreground: oklch(0.99 0.02 245);
-  --tier-d-border: oklch(0.4 0.11 245);
+  --tier-f: oklch(0.52 0.13 245);
+  --tier-f-foreground: oklch(0.99 0.02 245);
+  --tier-f-border: oklch(0.4 0.11 245);
 
   /* --- radius scale (restrained; cards are the most tactile surface) --- */
   --radius-sm: 0.375rem; /* chips, small controls */
@@ -81,9 +85,9 @@
   --color-tier-c: var(--tier-c);
   --color-tier-c-foreground: var(--tier-c-foreground);
   --color-tier-c-border: var(--tier-c-border);
-  --color-tier-d: var(--tier-d);
-  --color-tier-d-foreground: var(--tier-d-foreground);
-  --color-tier-d-border: var(--tier-d-border);
+  --color-tier-f: var(--tier-f);
+  --color-tier-f-foreground: var(--tier-f-foreground);
+  --color-tier-f-border: var(--tier-f-border);
 
   --font-display: var(--font-bricolage), ui-sans-serif, system-ui, sans-serif;
   --font-sans: var(--font-hanken), ui-sans-serif, system-ui, sans-serif;

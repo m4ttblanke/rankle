@@ -29,7 +29,7 @@ const uuid = z
     "expected a uuid",
   );
 
-/** A daily game's tier configuration, e.g. ["S","A","B","C","D"]. */
+/** A daily game's tier configuration, e.g. ["S","A","B","C","F","N/A"]. */
 export const tierConfigSchema = z
   .array(z.string().min(1).max(8))
   .min(2)

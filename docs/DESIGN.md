@@ -222,8 +222,13 @@ tier has three tokens: `fill`, `foreground` (the letter label on the fill), and
 --tier-a  oklch(0.62 0.16 50)   oklch(0.21 0.03 50)   oklch(0.45 0.13 50)   orange
 --tier-b  oklch(0.80 0.14 85)   oklch(0.26 0.04 85)   oklch(0.52 0.12 85)   amber
 --tier-c  oklch(0.54 0.14 150)  oklch(0.99 0.02 150)  oklch(0.40 0.11 150)  green
---tier-d  oklch(0.52 0.13 245)  oklch(0.99 0.02 245)  oklch(0.40 0.11 245)  blue
+--tier-f  oklch(0.52 0.13 245)  oklch(0.99 0.02 245)  oklch(0.40 0.11 245)  blue
 ```
+
+`N/A` ("haven't tried") intentionally has NO row here. It is an opinion
+abstention, not a bad opinion, so it must not look worse than F — it gets
+`tierStyle`'s NEUTRAL fallback (`--surface-muted` / `--foreground` / `--border`)
+instead of a spot on this ramp.
 
 Tier colors must remain distinguishable and accessible.
 
@@ -333,8 +338,10 @@ Avoid excessive instructions if the interaction can explain itself.
 - Empty lane state is a quiet "Empty"; the pool's is "Everything is ranked".
 - One HUD line: the remaining count as a large Bricolage figure (`tabular-nums`)
   + "left to rank"; on completion, "All N ranked ✓" (check in `--tier-c`).
-- Custom `tier_config` labels get the neutral fallback (`tierStyle` → NEUTRAL)
-  and stay fully functional — no behaviour keys off the literal S/A/B/C/D.
+- `N/A` and any custom `tier_config` label get the neutral fallback
+  (`tierStyle` → NEUTRAL) and stay fully functional — no behaviour keys off the
+  literal S/A/B/C/F. For `N/A` this is deliberate: it reads as "not rated,"
+  never as a tier worse than F.
 
 ---
 

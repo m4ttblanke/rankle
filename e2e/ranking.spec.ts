@@ -3,8 +3,8 @@ import { test, expect, type Locator, type Page } from "@playwright/test";
 /*
  * Interactive ranking board (Milestone 2), exercised on the dev-only
  * `/dev/preview` route with sample data ("Fast Food Fries", 10 items, tiers
- * S/A/B/C/D). That route fetches nothing — server or client — so it is also the
- * clean place to prove the pre-submission data boundary.
+ * S/A/B/C/F/N/A). That route fetches nothing — server or client — so it is
+ * also the clean place to prove the pre-submission data boundary.
  */
 
 const SAMPLE_ITEMS = [
@@ -87,7 +87,7 @@ test("starts with every item in Unranked and a remaining count", async ({
   page,
 }) => {
   expect(await labelsIn(laneList(page, /unranked items/i))).toEqual(SAMPLE_ITEMS);
-  for (const t of ["S", "A", "B", "C", "D"]) {
+  for (const t of ["S", "A", "B", "C", "F", "N/A"]) {
     expect(await labelsIn(laneList(page, new RegExp(`tier ${t}`, "i")))).toEqual(
       [],
     );
@@ -181,13 +181,15 @@ test("reorder within a tier via the card controls", async ({ page }) => {
 test("ranking every item shows the completion state and the submit control (Milestone 3)", async ({
   page,
 }) => {
-  const tiers = ["S", "A", "B", "C", "D"];
+  const tiers = ["S", "A", "B", "C", "F", "N/A"];
   for (let i = 0; i < SAMPLE_ITEMS.length; i++) {
     const label = SAMPLE_ITEMS[i];
     await cardButton(page, label).click();
     await page
       .getByRole("group", { name: new RegExp(`move ${escapeRe(label)}`, "i") })
-      .getByRole("button", { name: new RegExp(`^tier ${tiers[i % 5]}$`, "i") })
+      .getByRole("button", {
+        name: new RegExp(`^tier ${tiers[i % tiers.length]}$`, "i"),
+      })
       .click();
   }
   await expect(page.getByText(/all 10 ranked/i)).toBeVisible();
@@ -240,11 +242,67 @@ test("reduced motion: ranking still works end to end", async ({ page }) => {
   await cardButton(page, "Wendy's").click();
   await page
     .getByRole("group", { name: /move wendy/i })
-    .getByRole("button", { name: /^tier D$/i })
+    .getByRole("button", { name: /^tier F$/i })
     .click();
   await expect
-    .poll(() => labelsIn(laneList(page, /tier D/i)))
+    .poll(() => labelsIn(laneList(page, /tier F/i)))
     .toEqual(["Wendy's"]);
+});
+
+test("N/A is a valid destination: tap/click, drag, and keyboard all work", async ({
+  page,
+}) => {
+  // tap/click
+  await cardButton(page, "McDonald's").click();
+  await page
+    .getByRole("group", { name: /move mcdonald/i })
+    .getByRole("button", { name: /^tier N\/A$/i })
+    .click();
+  await expect
+    .poll(() => labelsIn(laneList(page, /tier N\/A/i)))
+    .toEqual(["McDonald's"]);
+  await expect(page.getByRole("heading", { name: /unranked . 9/i })).toBeVisible();
+
+  // drag (desktop viewport for pointer drag)
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto("/dev/preview");
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Fast Food Fries" }),
+  ).toBeVisible();
+  await dragCardToLane(page, "Five Guys", /tier N\/A/i);
+  await expect
+    .poll(() => labelsIn(laneList(page, /tier N\/A/i)))
+    .toContain("Five Guys");
+
+  // keyboard: Tab to a card, Enter opens the picker, Enter on N/A moves it.
+  // Fresh navigation first: the preceding pointer drag can leave focus on the
+  // dragged card, which would make Tab advance past (not land on) the first
+  // card.
+  await page.goto("/dev/preview");
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Fast Food Fries" }),
+  ).toBeVisible();
+  await page.keyboard.press("Tab");
+  await expect(cardButton(page, "McDonald's")).toBeFocused();
+  await page.keyboard.press("Enter");
+  const na = page
+    .getByRole("group", { name: /move mcdonald/i })
+    .getByRole("button", { name: /^tier N\/A$/i });
+  await na.focus();
+  await page.keyboard.press("Enter");
+  await expect
+    .poll(() => labelsIn(laneList(page, /tier N\/A/i)))
+    .toContain("McDonald's");
+
+  // N/A moves back to Unranked like any other tier
+  await cardButton(page, "McDonald's").click();
+  await page
+    .getByRole("group", { name: /move mcdonald/i })
+    .getByRole("button", { name: /^unranked$/i })
+    .click();
+  await expect
+    .poll(() => labelsIn(laneList(page, /unranked items/i)))
+    .toContain("McDonald's");
 });
 
 test.describe("touch", () => {
@@ -291,7 +349,7 @@ test.describe("touch", () => {
       touch("touchend", y0 - 50);
     });
 
-    for (const t of ["S", "A", "B", "C", "D"]) {
+    for (const t of ["S", "A", "B", "C", "F", "N/A"]) {
       expect(
         await labelsIn(laneList(page, new RegExp(`tier ${t}`, "i"))),
       ).toEqual([]);

@@ -16,7 +16,7 @@ afterEach(() => {
 });
 
 function makeGame(
-  tierConfig = ["S", "A", "B", "C", "D"],
+  tierConfig = ["S", "A", "B", "C", "F", "N/A"],
   labels = ["McDonald's", "Five Guys", "In-N-Out", "Wendy's"],
 ): DailyGame {
   return {
@@ -62,7 +62,7 @@ describe("<RankingBoard> initial state", () => {
       "In-N-Out",
       "Wendy's",
     ]);
-    for (const t of ["S", "A", "B", "C", "D"]) {
+    for (const t of ["S", "A", "B", "C", "F", "N/A"]) {
       expect(cardsIn(new RegExp(`tier ${t}`, "i"))).toEqual([]);
     }
     expect(
@@ -134,6 +134,78 @@ describe("<RankingBoard> non-drag ranking (tap/click picker)", () => {
     await user.click(pickerBtn(/close move menu/i));
     expect(screen.queryByRole("group")).toBeNull();
     expect(cardsIn(/unranked items/i)).toContain("Wendy's");
+  });
+});
+
+describe("<RankingBoard> N/A tier (haven't tried, distinct from Unranked)", () => {
+  it("tap/click: N/A is a normal destination and decrements remaining", async () => {
+    const user = userEvent.setup();
+    render(<RankingBoard game={makeGame()} />);
+    await user.click(card("McDonald's"));
+    await user.click(pickerBtn(/^tier N\/A$/i));
+    expect(cardsIn(/tier N\/A/i)).toEqual(["McDonald's"]);
+    expect(
+      screen.getByRole("heading", { name: /unranked · 3/i }),
+    ).toBeTruthy();
+  });
+
+  it("moves from N/A to another tier, then back to Unranked", async () => {
+    const user = userEvent.setup();
+    render(<RankingBoard game={makeGame()} />);
+    await user.click(card("Five Guys"));
+    await user.click(pickerBtn(/^tier N\/A$/i));
+    await user.click(card("Five Guys"));
+    await user.click(pickerBtn(/^tier B$/i));
+    expect(cardsIn(/tier B/i)).toEqual(["Five Guys"]);
+    expect(cardsIn(/tier N\/A/i)).toEqual([]);
+    await user.click(card("Five Guys"));
+    await user.click(pickerBtn(/^unranked$/i));
+    expect(cardsIn(/unranked items/i)).toContain("Five Guys");
+  });
+
+  it("keyboard: N/A is reachable and selectable like any other tier", async () => {
+    const user = userEvent.setup();
+    render(<RankingBoard game={makeGame()} />);
+    await user.click(card("Wendy's"));
+    pickerBtn(/^tier N\/A$/i).focus();
+    await user.keyboard("{Enter}");
+    expect(cardsIn(/tier N\/A/i)).toEqual(["Wendy's"]);
+  });
+
+  it("ranking every item into N/A still reaches the completion state", async () => {
+    const user = userEvent.setup();
+    render(<RankingBoard game={makeGame()} />);
+    for (const label of ["McDonald's", "Five Guys", "In-N-Out", "Wendy's"]) {
+      await user.click(card(label));
+      await user.click(pickerBtn(/^tier N\/A$/i));
+    }
+    expect(screen.getByText(/all 4 ranked/i)).toBeTruthy();
+    expect(
+      screen.getByRole("heading", { name: /unranked · 0/i }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: /^submit ranking$/i }),
+    ).toBeTruthy();
+  });
+
+  it("submission payload preserves tier: \"N/A\" verbatim", async () => {
+    submitRanking.mockResolvedValue({ ok: true });
+    const user = userEvent.setup();
+    render(<RankingBoard game={makeGame(["S", "N/A"], ["a", "b"])} />);
+    await user.click(card("a"));
+    await user.click(pickerBtn(/^tier S$/i));
+    await user.click(card("b"));
+    await user.click(pickerBtn(/^tier N\/A$/i));
+    await user.click(screen.getByRole("button", { name: /^submit ranking$/i }));
+    await user.click(screen.getByRole("button", { name: /^lock it in$/i }));
+    await screen.findByRole("heading", { name: /ranking locked in/i });
+    expect(submitRanking).toHaveBeenCalledWith({
+      tierlistId: "11111111-1111-4111-8111-111111111111",
+      items: [
+        { item_id: "item-0", tier: "S", position: 0 },
+        { item_id: "item-1", tier: "N/A", position: 0 },
+      ],
+    });
   });
 });
 
