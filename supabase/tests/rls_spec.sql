@@ -643,6 +643,203 @@ end;
 $$;
 
 -- =====================================================================
+-- 8. guest -> account claiming (Milestone 6)
+-- =====================================================================
+insert into auth.users (id, aud, role, email, email_confirmed_at, created_at, updated_at)
+values
+  ('dddddddd-0000-0000-0000-000000000004', 'authenticated', 'authenticated', 'dave@rankle.test',  now(), now(), now()),
+  ('eeeeeeee-0000-0000-0000-000000000005', 'authenticated', 'authenticated', 'erin@rankle.test',  now(), now(), now());
+
+do $$
+declare
+  g_dave       uuid := '0f000000-0000-0000-0000-0000000000d1'; -- dave's one guest identity, plays two games
+  g_erin_conf  uuid := '0f000000-0000-0000-0000-0000000000e1'; -- a guest who also plays erin's already-submitted game
+  dave         uuid := 'dddddddd-0000-0000-0000-000000000004';
+  erin         uuid := 'eeeeeeee-0000-0000-0000-000000000005';
+  live_game    uuid := '11111111-1111-1111-1111-111111111111';
+  na_game      uuid := '44444444-4444-4444-4444-444444444444';
+  sub_dave_live uuid;
+  sub_dave_na   uuid;
+  sub_erin_na   uuid;
+  sub_guest_na  uuid;
+  claimed_count integer;
+  stats_before  jsonb;
+  stats_after   jsonb;
+  tok           jsonb;
+  r             jsonb;
+begin
+  -- ---- SECURITY: this is not a public RPC at all ----------------------
+  -- Regardless of which guest_id is supplied (even a real one), neither
+  -- client role can reach this function through PostgREST -- the grant
+  -- itself is absent, so this fails before the function body ever runs.
+  perform pg_temp.rec('claim_guest_submissions: anon cannot call it at all',
+    pg_temp.run_as('anon', null,
+      format('select public.claim_guest_submissions(%L, %L)', dave, g_dave)) = '42501');
+  perform pg_temp.rec('claim_guest_submissions: authenticated cannot call it at all (not even for a real guest id)',
+    pg_temp.run_as('authenticated', erin,
+      format('select public.claim_guest_submissions(%L, %L)', erin, g_dave)) = '42501');
+
+  -- ---- A + B + C setup: dave plays as a guest, today's game AND an
+  --      older one, then "signs in" ------------------------------------
+  perform pg_temp.rec('setup: dave-as-guest submits live-game (today)',
+    pg_temp.run_as('anon', null, format(
+      'select public.submit_ranking(%L, %L::jsonb, %L)', live_game,
+      '[{"item_id":"10000000-0000-0000-0000-0000000000a1","tier":"S","position":0},'
+      || '{"item_id":"10000000-0000-0000-0000-0000000000b1","tier":"A","position":0},'
+      || '{"item_id":"10000000-0000-0000-0000-0000000000c1","tier":"F","position":0}]',
+      g_dave)) is null);
+
+  perform pg_temp.rec('setup: dave-as-guest submits na-game (historical)',
+    pg_temp.run_as('anon', null, format(
+      'select public.submit_ranking(%L, %L::jsonb, %L)', na_game,
+      '[{"item_id":"40000000-0000-0000-0000-0000000000a4","tier":"S","position":0},'
+      || '{"item_id":"40000000-0000-0000-0000-0000000000b4","tier":"N/A","position":0}]',
+      g_dave)) is null);
+
+  select id into sub_dave_live from public.submissions
+    where tierlist_id = live_game and guest_id = g_dave;
+  select id into sub_dave_na from public.submissions
+    where tierlist_id = na_game and guest_id = g_dave;
+
+  -- guest-created share, BEFORE dave ever signs in (requirement G)
+  tok := to_jsonb(public.create_share(sub_dave_live, g_dave));
+
+  -- snapshot na-game's aggregate before claiming, to prove claiming never
+  -- touches it
+  select jsonb_agg(to_jsonb(s) order by s.tierlist_item_id) into stats_before
+  from public.tierlist_item_stats s where s.tierlist_id = na_game;
+
+  perform pg_temp.rec('pre-claim: dave (authed, no claim yet) is NOT recognized as having submitted live-game',
+    pg_temp.eval_as('authenticated', dave,
+      format('select to_jsonb(public.has_submitted_ranking(%L, null))', live_game)) = 'false'::jsonb);
+
+  -- ---- the claim itself (simulates the service-role-only call site) ---
+  claimed_count := public.claim_guest_submissions(dave, g_dave);
+  perform pg_temp.rec('claim: claims both of dave''s eligible guest submissions',
+    claimed_count = 2, 'claimed=' || claimed_count::text);
+
+  -- ---- B: today's game immediately behaves as already-submitted -------
+  perform pg_temp.rec('B: has_submitted_ranking(live_game) is now true for dave, authenticated, no guest cookie needed',
+    pg_temp.eval_as('authenticated', dave,
+      format('select to_jsonb(public.has_submitted_ranking(%L, null))', live_game)) = 'true'::jsonb);
+
+  r := pg_temp.eval_as('authenticated', dave, format('select public.get_results(%L)', live_game));
+  perform pg_temp.rec('B: get_results works for dave on the claimed live-game submission',
+    (r ->> 'submission_id') = sub_dave_live::text
+    and jsonb_array_length(r -> 'my_ranking') = 3,
+    r::text);
+
+  perform pg_temp.rec('B: dave cannot submit live-game again as himself (claimed submission blocks it)',
+    pg_temp.run_as('authenticated', dave, format(
+      'select public.submit_ranking(%L, %L::jsonb, null)', live_game,
+      '[{"item_id":"10000000-0000-0000-0000-0000000000a1","tier":"F","position":0},'
+      || '{"item_id":"10000000-0000-0000-0000-0000000000b1","tier":"F","position":1},'
+      || '{"item_id":"10000000-0000-0000-0000-0000000000c1","tier":"F","position":2}]')) = '23505');
+
+  -- ---- G: the guest-created share still works, and dave can reuse it --
+  perform pg_temp.rec('G: dave can re-fetch the guest-created share token for his now-claimed submission',
+    pg_temp.eval_as('authenticated', dave,
+      format('select to_jsonb(public.create_share(%L))', sub_dave_live)) = tok);
+
+  r := pg_temp.eval_as('anon', null, format('select public.get_share(%L)', tok #>> '{}'));
+  perform pg_temp.rec('G: a fresh anonymous viewer of the claimed share still only gets the locked teaser',
+    (r ->> 'locked') = 'true' and (r -> 'ranking') = 'null'::jsonb, r::text);
+
+  -- ---- C: the historical (non-today) submission is claimed too --------
+  perform pg_temp.rec('C: get_results works for dave on the claimed historical na-game submission',
+    (pg_temp.eval_as('authenticated', dave, format('select public.get_results(%L)', na_game))
+      ->> 'submission_id') = sub_dave_na::text);
+
+  -- ---- history reader: dave can SELECT the claimed submission ROW ITSELF
+  --      directly (not just via get_results) -- /profile and /history/[id]
+  --      read submissions/submission_items directly, no RPC -----------
+  perform pg_temp.rec('history: dave can SELECT his claimed submission row directly (submissions RLS)',
+    pg_temp.eval_as('authenticated', dave,
+      format('select to_jsonb((select count(*) from public.submissions where id = %L))', sub_dave_live))
+      = '1'::jsonb);
+  perform pg_temp.rec('history: dave can SELECT his claimed submission''s items directly (submission_items RLS)',
+    pg_temp.eval_as('authenticated', dave,
+      format('select to_jsonb((select count(*) from public.submission_items where submission_id = %L))', sub_dave_live))
+      = '3'::jsonb);
+  perform pg_temp.rec('history: carol CANNOT SELECT dave''s claimed submission row',
+    pg_temp.eval_as('authenticated', 'cccccccc-0000-0000-0000-000000000003',
+      format('select to_jsonb((select count(*) from public.submissions where id = %L))', sub_dave_live))
+      = '0'::jsonb);
+  perform pg_temp.rec('history: carol CANNOT SELECT dave''s claimed submission''s items',
+    pg_temp.eval_as('authenticated', 'cccccccc-0000-0000-0000-000000000003',
+      format('select to_jsonb((select count(*) from public.submission_items where submission_id = %L))', sub_dave_live))
+      = '0'::jsonb);
+
+  -- ---- history reader: authenticated SELECT via RLS sees both rows ----
+  perform pg_temp.rec('history: dave can read both his claimed rows via RLS-gated SELECT',
+    pg_temp.eval_as('authenticated', dave,
+      'select to_jsonb((select count(*) from public.claimed_guest_submissions))') = '2'::jsonb,
+    pg_temp.eval_as('authenticated', dave,
+      'select to_jsonb((select count(*) from public.claimed_guest_submissions))')::text);
+  perform pg_temp.rec('history: carol cannot see dave''s claimed rows',
+    pg_temp.eval_as('authenticated', 'cccccccc-0000-0000-0000-000000000003',
+      'select to_jsonb((select count(*) from public.claimed_guest_submissions))') = '0'::jsonb,
+    pg_temp.eval_as('authenticated', 'cccccccc-0000-0000-0000-000000000003',
+      'select to_jsonb((select count(*) from public.claimed_guest_submissions))')::text);
+
+  -- ---- aggregates: claiming never touched na-game's stats --------------
+  select jsonb_agg(to_jsonb(s) order by s.tierlist_item_id) into stats_after
+  from public.tierlist_item_stats s where s.tierlist_id = na_game;
+  perform pg_temp.rec('aggregate: claiming did not change na-game''s tierlist_item_stats at all',
+    stats_before = stats_after, stats_before::text || ' vs ' || stats_after::text);
+
+  -- ---- E: idempotent repeat claim (e.g. a second sign-in) --------------
+  claimed_count := public.claim_guest_submissions(dave, g_dave);
+  perform pg_temp.rec('E: repeating the claim call claims nothing new',
+    claimed_count = 0);
+  perform pg_temp.rec('E: repeating the claim call created no duplicate rows',
+    (select count(*) from public.claimed_guest_submissions where user_id = dave) = 2);
+
+  -- ---- D: conflict -- erin already has a DIRECT submission for na-game,
+  --        a different guest also submitted na-game; claiming that guest
+  --        must NOT touch erin's game -------------------------------------
+  perform pg_temp.rec('setup: erin submits na-game directly (authenticated)',
+    pg_temp.run_as('authenticated', erin, format(
+      'select public.submit_ranking(%L, %L::jsonb, null)', na_game,
+      '[{"item_id":"40000000-0000-0000-0000-0000000000a4","tier":"A","position":0},'
+      || '{"item_id":"40000000-0000-0000-0000-0000000000b4","tier":"N/A","position":0}]')) is null);
+
+  perform pg_temp.rec('setup: a different guest also submits na-game',
+    pg_temp.run_as('anon', null, format(
+      'select public.submit_ranking(%L, %L::jsonb, %L)', na_game,
+      '[{"item_id":"40000000-0000-0000-0000-0000000000a4","tier":"F","position":0},'
+      || '{"item_id":"40000000-0000-0000-0000-0000000000b4","tier":"S","position":0}]',
+      g_erin_conf)) is null);
+
+  select id into sub_erin_na from public.submissions where tierlist_id = na_game and user_id = erin;
+  select id into sub_guest_na from public.submissions where tierlist_id = na_game and guest_id = g_erin_conf;
+
+  claimed_count := public.claim_guest_submissions(erin, g_erin_conf);
+  perform pg_temp.rec('D: the conflicting guest submission is NOT claimed (direct submission wins)',
+    claimed_count = 0);
+  perform pg_temp.rec('D: no claimed_guest_submissions row exists for the conflicting guest submission',
+    not exists (select 1 from public.claimed_guest_submissions where submission_id = sub_guest_na));
+  perform pg_temp.rec('D: erin''s get_results still shows HER OWN direct ranking, not the guest''s',
+    (pg_temp.eval_as('authenticated', erin, format('select public.get_results(%L)', na_game))
+      ->> 'submission_id') = sub_erin_na::text);
+  perform pg_temp.rec('D: the unclaimed guest submission remains guest-owned (still fetchable as that guest)',
+    pg_temp.eval_as('anon', null, format(
+      'select to_jsonb(public.has_submitted_ranking(%L, %L))',
+      na_game, g_erin_conf)) = 'true'::jsonb);
+
+  -- ---- F: an authenticated attacker cannot claim a guest they don't own,
+  --        because the RPC is not reachable by their role at all, for ANY
+  --        guest id -- already proven above, but repeat with a REAL
+  --        (someone else's) guest id for clarity ------------------------
+  perform pg_temp.rec('F: erin cannot use the authenticated role to claim dave''s real guest id',
+    pg_temp.run_as('authenticated', erin,
+      format('select public.claim_guest_submissions(%L, %L)', erin, g_dave)) = '42501');
+  perform pg_temp.rec('F: dave''s claimed rows are unaffected by erin''s attempt',
+    (select count(*) from public.claimed_guest_submissions where user_id = dave) = 2);
+end;
+$$;
+
+-- =====================================================================
 -- results
 -- =====================================================================
 select id, status, name, detail from _t order by id;

@@ -147,6 +147,16 @@ Users may not modify another user's submission.
 
 Official submissions should not be editable after commitment.
 
+**As built (Milestone 6):** the `submissions`/`submission_items` SELECT
+policies also match a row linked via `claimed_guest_submissions` to the
+caller, not just a direct `user_id` match — a claimed guest submission reads
+exactly like the user's own (`/profile`, `/history/[id]`). `is_admin` remains
+never selectable/writable by any client role, unchanged. `profiles` itself
+still has zero `anon` grant — no public profile exposure was added; only the
+owner's own `/profile` exists (a public `/profile/[username]` was explicitly
+deferred to a later, deliberately social milestone — see `docs/MANUAL.md`
+sec 13).
+
 ### Friend Requests
 
 Users may create requests involving themselves.
@@ -425,6 +435,16 @@ OAuth callback URLs must be explicitly configured.
 
 Never store OAuth provider secrets in browser code.
 
+**As built (Milestone 6):** email magic link only (Supabase Auth OTP) — no
+passwords, no OAuth providers, so there are no provider secrets to manage at
+all. `app/actions/sign-in.ts` calls `auth.signInWithOtp()` with
+`emailRedirectTo` always built server-side from `NEXT_PUBLIC_APP_URL` (never
+a client-supplied value); `app/auth/callback/route.ts` exchanges the code for
+a session and redirects to a fixed destination (`/profile` on success,
+`/login?error=1` on failure) — never a query-string-supplied target, so there
+is no open-redirect surface in the callback. See `docs/DEPLOY.md` sec 9-10
+for the exact local/production redirect URL configuration this requires.
+
 See `DEPLOY.md` for environment setup.
 
 ---
@@ -605,6 +625,58 @@ Submission-state recognition for a guest (has this identity already submitted
 today's game?) uses `public.has_submitted_ranking(tierlist_id, guest_id)` — a
 `SECURITY DEFINER` RPC that returns only a boolean, never community or ranking
 data, so it is safe to call before the spoiler gate opens (sec 7).
+
+**As built (Milestone 6) — guest → account claiming:** signing in claims a
+guest's past submissions into the new account without ever mutating the
+original (immutable) `submissions` row. `claimed_guest_submissions`
+(`supabase/migrations/20260912000000_guest_account_claiming.sql`) links a
+submission id to the claiming `user_id`; `private.has_submitted`,
+`has_submitted_ranking`, `get_results`, and `create_share` were all extended
+to recognize a claimed submission as the user's own (and the RLS SELECT
+policies on `submissions`/`submission_items` widened the same way, so
+`/profile` and `/history/[id]`'s plain table reads work). `submit_ranking`
+gained an explicit pre-check so a claimed submission also blocks a *second*,
+direct submission for the same game — the unique index alone can't catch
+that case, since a claimed row never gets `user_id` set.
+
+Conflict rule: if the authenticated user already has a *direct* submission
+(or an earlier claim) for a tierlist, a guest submission for that same
+tierlist is never claimed — it stays guest-owned, permanently. The direct/
+already-claimed submission always wins; nothing is merged, copied, or
+deleted, and claiming never touches `tierlist_item_stats` (the aggregate
+table) at all.
+
+**`claim_guest_submissions(p_user_id, p_guest_id)` is deliberately NOT a
+public RPC** — no `EXECUTE` grant to `anon` or `authenticated` at all, unlike
+every other RPC in this project. The reason: its real authorization question
+— "does the caller actually possess the signed httpOnly guest cookie for
+`p_guest_id`?" — is an HMAC check against `GUEST_COOKIE_SECRET`, a secret
+Postgres does not have and RLS cannot express. A raw guest UUID is not proof
+of anything to the database on its own (unlike an M5 share token, which is
+*designed* to be handed to someone else — a guest id is never intentionally
+exposed, but "the app never shows it to anyone" is not a database-level
+security boundary). Granting this function to `authenticated` would let any
+signed-in caller attempt to claim any guest's history merely by supplying its
+UUID through PostgREST directly, with nothing to stop them.
+
+Instead, the function is reachable only by whoever holds the service-role
+key. `lib/supabase/service-role.ts` creates that client, and
+`lib/game/claim-guest-submissions.ts` is its only call site, invoked once —
+from `app/auth/callback`'s Route Handler — after that handler has
+independently verified, in the same request: (a) a real Supabase Auth session
+via `auth.getUser()` (JWT-verified, not a raw cookie read), and (b) a validly
+HMAC-signed guest cookie via the existing `getGuestId()` (returns `null` if
+missing or tampered). No client UI or API in this codebase accepts a
+user-entered guest UUID anywhere. Verified directly in
+`supabase/tests/rls_spec.sql`: calling
+`/rest/v1/rpc/claim_guest_submissions` as `anon` or `authenticated` — with
+any `p_guest_id`, including a real one belonging to someone else — fails
+with `42501` before the function body ever runs.
+
+Idempotent by construction: repeated claim calls for the same
+`(user_id, guest_id)` pair claim nothing new and create no duplicate rows
+(the `not exists (already claimed)` check, plus the table's own primary key).
+Safe to call on every sign-in.
 
 ---
 

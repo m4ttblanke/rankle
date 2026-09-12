@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { ResultsView } from "@/components/results/results-view";
+import { AppHeader } from "@/components/layout/app-header";
 import { getDailyGame } from "@/lib/game/get-daily-game";
 import { getGuestId } from "@/lib/game/guest";
 import { getResults } from "@/lib/game/get-results";
@@ -34,5 +35,10 @@ export default async function ResultsPage() {
   const results = await getResults(game.id, guestId);
   if (!results) redirect("/");
 
-  return <ResultsView results={results} />;
+  return (
+    <>
+      <AppHeader />
+      <ResultsView results={results} />
+    </>
+  );
 }

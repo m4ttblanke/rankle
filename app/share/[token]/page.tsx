@@ -3,6 +3,7 @@ import { InvalidShare } from "@/components/share/invalid-share";
 import { ShareGate } from "@/components/share/share-gate";
 import { ShareReveal } from "@/components/share/share-reveal";
 import { ShareWrappedUp } from "@/components/share/share-wrapped-up";
+import { AppHeader } from "@/components/layout/app-header";
 import { getDailyGame } from "@/lib/game/get-daily-game";
 import { getGuestId } from "@/lib/game/guest";
 import { getResults } from "@/lib/game/get-results";
@@ -69,16 +70,28 @@ export default async function SharePage({ params }: Params) {
   const guestId = await getGuestId();
   const share = await getShare(token, guestId);
 
-  if (!share) return <InvalidShare />;
+  if (!share) {
+    return (
+      <>
+        <AppHeader />
+        <InvalidShare />
+      </>
+    );
+  }
 
   const todayGame = await getDailyGame();
   const isCurrentGame = todayGame?.slug === share.tierlistSlug;
 
   if (share.locked) {
-    return isCurrentGame ? (
-      <ShareGate token={token} share={share} />
-    ) : (
-      <ShareWrappedUp share={share} />
+    return (
+      <>
+        <AppHeader />
+        {isCurrentGame ? (
+          <ShareGate token={token} share={share} />
+        ) : (
+          <ShareWrappedUp share={share} />
+        )}
+      </>
     );
   }
 
@@ -90,7 +103,19 @@ export default async function SharePage({ params }: Params) {
   // always succeed here. Falling back to "wrapped up" rather than crashing
   // if that invariant is ever violated (e.g. the game was disabled between
   // eligibility check and this read).
-  if (!myResults) return <ShareWrappedUp share={share} />;
+  if (!myResults) {
+    return (
+      <>
+        <AppHeader />
+        <ShareWrappedUp share={share} />
+      </>
+    );
+  }
 
-  return <ShareReveal share={share} myResults={myResults} />;
+  return (
+    <>
+      <AppHeader />
+      <ShareReveal share={share} myResults={myResults} />
+    </>
+  );
 }

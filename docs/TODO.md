@@ -115,17 +115,22 @@ Periodically clean up old completed items.
 
 ## Accounts
 
-- [ ] Configure chosen Supabase Auth providers
-- [ ] Build sign-in flow
-- [ ] Add profile model
-- [ ] Add unique usernames
-- [ ] Add display names
-- [ ] Add avatar support
-- [ ] Add history page
-- [ ] Add current streak
-- [ ] Add longest streak
-- [ ] Add total games played
-- [ ] Add streak unit tests
+- [x] Configure chosen Supabase Auth providers (email magic link only; local
+  `supabase/config.toml` `[auth]` site_url/redirect URLs — production TBD
+  until a domain exists, see `docs/DEPLOY.md` sec 9-10)
+- [x] Build sign-in flow (`/login`, `/auth/callback`, `app/actions/sign-in.ts`,
+  `app/actions/sign-out.ts`)
+- [x] Add profile model (pre-existing `profiles` table/trigger, unchanged)
+- [x] Add unique usernames (pre-existing DB constraint; `/profile` edit UI added)
+- [x] Add display names (same)
+- [ ] Add avatar support (deferred — initials placeholder only,
+  `components/profile/avatar.tsx`; `avatar_url` stays unused)
+- [x] Add history page (`/profile`, `/history/[submissionId]`)
+- [ ] Add current streak (explicitly out of scope for M6/M9)
+- [ ] Add longest streak (same)
+- [ ] Add total games played (history *count* exists; a dedicated stat is
+  deferred)
+- [ ] Add streak unit tests (no streak feature yet)
 
 ## Friends
 
@@ -273,7 +278,7 @@ Track unresolved product choices here until decided.
 - [ ] Final production domain
 - [ ] Canonical application timezone confirmation
 - [ ] Guest submission persistence approach
-- [ ] Initial authentication providers
+- [x] Initial authentication providers — email magic link only (Milestone 6)
 - [ ] Whether archived games can be played by guests
 - [ ] Exact consensus formula
 - [ ] Exact controversy formula
@@ -510,3 +515,83 @@ Follow-ups it surfaced:
   Acceptable per the M5 brief ("do NOT build a dynamic OG image rendering
   system just for M5"); revisit if link-preview engagement data suggests it's
   worth the cost.
+
+## Milestone 6 — accounts & profiles (2026-09-12)
+
+Supabase Auth, email magic link only (no passwords, no OAuth, no
+Auth.js/NextAuth). `profiles` + `private.handle_new_user()` already existed
+(pre-M1) and needed no changes — a new account is immediately usable, no
+onboarding gate. New routes: `/login`, `/auth/callback` (Route Handler),
+`/profile` (own profile only — editable username/display name, initials
+placeholder avatar, history list), `/history/[submissionId]` (read-only,
+ownership-checked). `middleware.ts` was written then renamed to `proxy.ts` +
+`proxy()` mid-implementation — Next 16.3.4 deprecated the `middleware`
+convention in favor of `proxy` (build warning caught it).
+
+**Guest → account claiming** (the milestone's hardest problem, revised from
+the original plan mid-review): a new `claimed_guest_submissions` link table
+records that an authenticated user owns a specific guest-submitted row,
+*without ever mutating the immutable `submissions`/`submission_items` rows*.
+`private.has_submitted`, `has_submitted_ranking`, `get_results`,
+`create_share`, and the `submissions`/`submission_items` RLS SELECT policies
+were all extended to recognize a claimed submission as the user's own —
+verified end to end (not just simulated) with a real Supabase Auth session
+created via `auth.admin.createUser` + `generateLink` + `verifyOtp`
+(`lib/game/claim-guest-submissions.integration.test.ts`). `submit_ranking`
+gained an explicit duplicate-via-claim guard, since the unique index alone
+can't catch a second *direct* submission for a game already represented by a
+claimed row. Conflict rule: a direct (or already-claimed) submission for a
+tierlist always wins; a colliding guest submission for that same tierlist is
+simply never claimed, permanently.
+
+`claim_guest_submissions(p_user_id, p_guest_id)` is deliberately **not** a
+public RPC — no grant to `anon`/`authenticated` at all, reachable only via
+the service-role client (`lib/supabase/service-role.ts`), called exactly once
+(`app/auth/callback`), only after that handler independently verifies a real
+session (`auth.getUser()`) and a signed guest cookie (`getGuestId()`) in the
+same request. This was a deliberate, narrow, documented use of service-role —
+the alternative (granting the RPC broadly) would let any authenticated caller
+attempt to claim any guest's history merely by supplying its UUID through
+PostgREST directly. See `docs/SECURITY.md` sec 26.
+
+One migration:
+`supabase/migrations/20260912000000_guest_account_claiming.sql` — the new
+table/RPC plus the five modified functions/policies above. Approved and
+applied following the same local-first, checkpoint-gated workflow as M5.
+
+Public profiles of other users (`/profile/[username]`) were explicitly
+**not** built — `profiles` has no anon read grant, and building one would
+have meant inventing a privacy/product decision (whose history is visible to
+whom) that belongs to a genuinely social milestone, not this one.
+
+264 Vitest (48 new: sign-in/sign-out/update-profile actions, the auth
+callback, `claimGuestSubmissions`, `getCurrentUser`/`getCurrentProfile`, a
+real-auth-user integration file) + 68 Playwright (8 new
+`e2e/accounts.spec.ts`, driving the *real* magic-link flow end to end via
+local Mailpit — no auth step mocked) green, plus SQL/RLS 110/110 (29 new,
+covering every identity-transition scenario including the direct-PostgREST
+attack attempt), lint, typecheck, and a production build.
+
+Follow-ups it surfaced:
+
+- [ ] `notFound()` in `/history/[submissionId]` (and pre-existing `redirect()`
+  calls in `/results`, etc.) return HTTP 200, not the semantically correct
+  4xx/3xx status — a consequence of the root `app/loading.tsx` Suspense
+  boundary already streaming the 200 before the async page component's
+  `notFound()`/`redirect()` runs. Pre-existing app-wide Next.js behavior, not
+  M6-specific; the rendered *content* is correct either way (no data leak),
+  and the e2e suite asserts on content for exactly this reason. Revisit only
+  if an exact status code is ever load-bearing for something (e.g. a crawler
+  or monitoring check).
+- [ ] `/login` and `/profile` don't move focus to their own heading after a
+  client-side transition (same deferred class of issue as M4/M5's heading-
+  focus notes).
+- [ ] "Total games played" is currently just the history list's length,
+  shown inline (`Your Rankles (N)`) — no separate profile stat card. Fine for
+  now; revisit if `/profile` grows more stats later.
+- [ ] `supabase/seed.sql`'s release dates are computed from `private.today()`
+  at reset time, so a long-running local stack can drift out of sync with
+  the real calendar day (hit during this milestone's own e2e runs — see
+  `docs/DEPLOY.md`'s Local Supabase section for the symptom/fix). Not a
+  product bug, just a local-dev-environment note now documented so it isn't
+  re-discovered the hard way.

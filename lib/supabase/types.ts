@@ -15,13 +15,69 @@ export type Json =
   | Json[]
 
 export type Database = {
-  // Allows to automatically instantiate createClient with right options
-  // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
-  __InternalSupabase: {
-    PostgrestVersion: "14.5"
+  graphql_public: {
+    Tables: {
+      [_ in never]: never
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      graphql: {
+        Args: {
+          extensions?: Json
+          operationName?: string
+          query?: string
+          variables?: Json
+        }
+        Returns: Json
+      }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
   }
   public: {
     Tables: {
+      claimed_guest_submissions: {
+        Row: {
+          claimed_at: string
+          guest_id: string
+          submission_id: string
+          user_id: string
+        }
+        Insert: {
+          claimed_at?: string
+          guest_id: string
+          submission_id: string
+          user_id: string
+        }
+        Update: {
+          claimed_at?: string
+          guest_id?: string
+          submission_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "claimed_guest_submissions_submission_id_fkey"
+            columns: ["submission_id"]
+            isOneToOne: true
+            referencedRelation: "submissions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "claimed_guest_submissions_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           avatar_url: string | null
@@ -314,6 +370,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      claim_guest_submissions: {
+        Args: { p_guest_id: string; p_user_id: string }
+        Returns: number
+      }
       create_share: {
         Args: { p_guest_id?: string; p_submission_id: string }
         Returns: string
@@ -462,7 +522,11 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
+  graphql_public: {
+    Enums: {},
+  },
   public: {
     Enums: {},
   },
 } as const
+

@@ -6,9 +6,14 @@
 #   supabase link --project-ref zhivsldkpavidxzrgtjl
 #
 # Canonical application timezone (America/Los_Angeles) is NOT a Supabase setting.
-# It lives in the database as private.app_tz() (migration 1). GoTrue auth
-# providers, redirect URLs, and rate limits are configured in the dashboard and
-# documented in docs/DEPLOY.md.
+# It lives in the database as private.app_tz() (migration 1).
+#
+# REMOTE GoTrue auth providers, redirect URLs, and rate limits are configured
+# in the dashboard and documented in docs/DEPLOY.md -- this file never affects
+# the remote project. The [auth] section below configures ONLY the local CLI
+# stack (`supabase start`), which otherwise falls back to a default site_url
+# that doesn't match this app's dev server, silently sending magic links to
+# the wrong place instead of app/auth/callback (Milestone 6).
 
 project_id = "rankle"
 
@@ -18,3 +23,7 @@ major_version = 17
 [db.seed]
 enabled = true
 sql_paths = ["./seed.sql"]
+
+[auth]
+site_url = "http://localhost:3000"
+additional_redirect_urls = ["http://localhost:3000/**"]

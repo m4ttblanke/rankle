@@ -8,13 +8,21 @@ import {
 import { createClient } from "@/lib/supabase/server";
 
 /**
- * The one server-controlled submission boundary (Milestone 3).
+ * The one server-controlled submission boundary (Milestone 3; identity
+ * resolution updated in Milestone 6).
  *
- * - Identity comes only from the signed httpOnly guest cookie — never from the
- *   request body.
+ * - Identity comes only from server-verified state — never from the request
+ *   body. An authenticated caller (`auth.getUser()`, JWT-verified) submits as
+ *   themselves; `submit_ranking` requires EXACTLY ONE of an authenticated
+ *   user or a guest id, so a signed-in caller must never also send a guest
+ *   id here (a leftover guest cookie is simply ignored, not minted further —
+ *   `ensureGuestId()` is only called in the guest branch). A signed-out
+ *   caller falls back to the signed httpOnly guest cookie, as before.
  * - The body is shape-validated; the database RPC `submit_ranking` remains the
  *   authoritative, atomic write path and the final authority on every semantic
- *   rule (open game, complete ranking, valid tiers/positions, one-per-identity,
+ *   rule (open game, complete ranking, valid tiers/positions, one-per-identity
+ *   — including a claimed guest submission counting as this user's own, see
+ *   `supabase/migrations/20260912000000_guest_account_claiming.sql` —
  *   transactional aggregates).
  * - Runs under the RLS client (publishable key). The service-role key is never
  *   used here.
@@ -32,20 +40,26 @@ export async function submitRanking(
   }
   const { tierlistId, items } = parsed.data;
 
-  let guestId: string;
+  const supabase = await createClient();
+
+  let guestId: string | null = null;
   try {
-    guestId = await ensureGuestId();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      guestId = await ensureGuestId();
+    }
   } catch (err) {
-    console.error("[submit-ranking] could not establish guest identity", err);
+    console.error("[submit-ranking] could not establish identity", err);
     return { ok: false, reason: "network" };
   }
 
   try {
-    const supabase = await createClient();
     const { error } = await supabase.rpc("submit_ranking", {
       p_tierlist_id: tierlistId,
       p_items: items,
-      p_guest_id: guestId,
+      p_guest_id: guestId ?? undefined,
     });
 
     if (!error) return { ok: true };

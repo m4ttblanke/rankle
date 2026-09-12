@@ -359,6 +359,20 @@ Private fields are not part of the public profile.
 
 See `SECURITY.md`.
 
+**As built (Milestone 6):** `profiles` already existed (pre-M1) with
+`username`/`display_name`/`avatar_url`/`is_admin`/timestamps, and
+`private.handle_new_user()` already auto-creates a row on `auth.users` insert
+(auto-generated `user_<12 hex>` username, `display_name` from OAuth metadata
+or `"Player"`). M6 built on this unchanged — no onboarding gate: a new
+account is immediately usable, and `/profile` (`app/profile/page.tsx`) lets
+the owner rename their username/display name anytime
+(`app/actions/update-profile.ts`, a plain RLS-gated `UPDATE`, no RPC).
+Avatar upload is deferred; `/profile` shows an initials placeholder
+(`components/profile/avatar.tsx`), `avatar_url` stays unused.
+**Only the owner's own `/profile` exists in M6** — a public
+`/profile/[username]` for other users was explicitly deferred (no anon read
+grant on `profiles` exists; see `SECURITY.md` sec 6a).
+
 ---
 
 ## 14. History
@@ -641,8 +655,11 @@ Likely routes include:
  /game/[slug]
  /share/[token]
 
+ /login
+ /auth/callback
  /profile
  /profile/[username]
+ /history/[submissionId]
 
  /friends
  /friends/requests

@@ -70,7 +70,10 @@ NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=     # the "sb_publishable_..." key
 NEXT_PUBLIC_APP_URL=                       # defaults to http://localhost:3000 if unset
 
 # Server-only — never prefix with NEXT_PUBLIC_
-SUPABASE_SERVICE_ROLE_KEY=          # bypasses RLS; unused as of Milestone 3
+SUPABASE_SERVICE_ROLE_KEY=          # bypasses RLS; as of Milestone 6, used only
+                                     # by lib/supabase/service-role.ts to call
+                                     # claim_guest_submissions() from the auth
+                                     # callback (see docs/SECURITY.md sec 26)
 GUEST_COOKIE_SECRET=                 # signs the guest identity cookie (Milestone 3)
 
 # Local design tooling only (not read by the app)
@@ -119,6 +122,13 @@ cp .env.test.example .env.test   # fill in from `npx supabase status`
 npm run test:integration          # lib/game/submit-ranking.integration.test.ts
 npm run test:e2e                  # also picks up .env.test for the dev server
 ```
+
+`supabase/seed.sql` computes its release dates from `private.today()` at
+reset time — if a local stack has been running since before local midnight,
+the seeded "live" game can drift out of sync with what the resolver now
+considers "today" (a scheduled seed game can overtake it). Symptom: e2e/
+integration tests suddenly can't find "Fast Food Fries" as today's game. Fix:
+`npm run db:reset` again to resync.
 
 `.env.test` is gitignored; only the `.example` file is committed. The
 integration test hard-refuses to run against any URL that is not
@@ -193,35 +203,44 @@ Do not seed demo content into production unless explicitly intended.
 
 ## 9. Authentication
 
-Configure only providers actually used.
+**As built (Milestone 6):** email magic link only (Supabase Auth OTP) — no
+passwords, no OAuth providers, so there is no client ID/secret/provider
+callback configuration to do. The only setup required is the redirect URL
+allowlist (sec 10).
 
-Potential providers:
-
-- Email
-- Google
-- Apple
-
-For OAuth providers configure:
-
-- Client ID
-- Client secret
-- Authorized redirect URL
-- Production URL
-- Preview/local callback URLs where appropriate
-
-Document provider-specific callback values here once finalized.
+Document provider-specific callback values here if an OAuth provider is ever
+added.
 
 ---
 
 ## 10. Supabase Auth Redirects
 
-Configure approved site and redirect URLs for:
+**Local (already configured, `supabase/config.toml`):**
 
-- Local development
-- Production
-- Preview environments if supported
+```toml
+[auth]
+site_url = "http://localhost:3000"
+additional_redirect_urls = ["http://localhost:3000/**"]
+```
 
-Avoid wildcard redirects broader than necessary.
+This file only affects the local CLI-managed stack (`supabase start`) — it
+never touches the remote project. Without it, GoTrue's default `site_url`
+doesn't match this app's dev server, and magic links silently redirect
+somewhere other than `app/auth/callback` instead of erroring loudly, which is
+why this is called out explicitly rather than left to CLI defaults.
+
+**Production: not yet configured.** Rankle has no production web
+deployment/domain yet (sec 14, "Production URL: TBD"). Once one exists, set
+in the remote project's Dashboard (Authentication → URL Configuration) —
+*never* in `supabase/config.toml`, which does not apply to the remote
+project:
+
+- **Site URL:** the production domain (e.g. `https://rankle.example.com`)
+- **Redirect URLs:** `https://rankle.example.com/**` (and the same for any
+  preview deployment domain, if Vercel preview URLs should also support
+  sign-in)
+
+Avoid wildcard redirects broader than the app's own domain(s).
 
 ---
 

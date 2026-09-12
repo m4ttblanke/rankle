@@ -10,22 +10,22 @@ import { createClient } from "@/lib/supabase/server";
  * Any failure is treated as "not submitted" so the daily game screen still
  * renders (docs/DESIGN.md sec 27) — the database unique index is still the
  * authority that prevents a real double submission.
+ *
+ * Always calls the RPC, even with `guestId: null` — the RPC itself resolves
+ * identity (authenticated session first, guest id only as a fallback when
+ * signed out), so a signed-in caller with no guest cookie is still correctly
+ * recognized (Milestone 6; a `guestId`-only short-circuit here would
+ * incorrectly report "not submitted" for exactly that caller).
  */
 export async function hasSubmittedRanking(
   tierlistId: string,
   guestId: string | null,
 ): Promise<boolean> {
-  // Milestone 3 has no authentication, so no guest cookie means no prior
-  // submission and there is nothing to ask the database. Revisit this
-  // short-circuit when signed-in users exist (they have identity without a
-  // guest cookie).
-  if (!guestId) return false;
-
   try {
     const supabase = await createClient();
     const { data, error } = await supabase.rpc("has_submitted_ranking", {
       p_tierlist_id: tierlistId,
-      p_guest_id: guestId,
+      p_guest_id: guestId ?? undefined,
     });
     if (error) {
       console.error(

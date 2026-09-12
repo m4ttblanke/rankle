@@ -1,17 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
- * The submission Server Action boundary (Milestone 3). Both collaborators are
- * mocked: identity must come only from `ensureGuestId()` (never the payload),
- * and the RLS client's `rpc` call is the only path to `submit_ranking` — never
- * a service-role client.
+ * The submission Server Action boundary (Milestone 3; identity resolution
+ * updated in Milestone 6). Both collaborators are mocked: identity must come
+ * only from `auth.getUser()` / `ensureGuestId()` (never the payload), and the
+ * RLS client's `rpc` call is the only path to `submit_ranking` — never a
+ * service-role client.
  */
 
 const ensureGuestId = vi.fn();
 vi.mock("@/lib/game/guest", () => ({ ensureGuestId }));
 
 const rpc = vi.fn();
-const createClient = vi.fn(async () => ({ rpc }));
+const getUser = vi.fn();
+const createClient = vi.fn(async () => ({ rpc, auth: { getUser } }));
 vi.mock("@/lib/supabase/server", () => ({ createClient }));
 
 const { submitRanking } = await import("./submit-ranking");
@@ -19,10 +21,12 @@ const { submitRanking } = await import("./submit-ranking");
 const GAME_ID = "11111111-1111-4111-8111-111111111111";
 const ITEM_ID = "22222222-2222-4222-8222-222222222222";
 const GUEST_ID = "33333333-3333-4333-8333-333333333333";
+const USER_ID = "55555555-5555-4555-8555-555555555555";
 
 beforeEach(() => {
   vi.clearAllMocks();
   ensureGuestId.mockResolvedValue(GUEST_ID);
+  getUser.mockResolvedValue({ data: { user: null }, error: null });
   rpc.mockResolvedValue({ data: "submission-id", error: null });
 });
 
@@ -57,8 +61,8 @@ describe("submitRanking — validation", () => {
   });
 });
 
-describe("submitRanking — identity", () => {
-  it("identity comes only from ensureGuestId(), never from the request body", async () => {
+describe("submitRanking — identity (guest)", () => {
+  it("a signed-out caller identifies via ensureGuestId(), never from the request body", async () => {
     await submitRanking(validInput());
     expect(ensureGuestId).toHaveBeenCalled();
     expect(rpc).toHaveBeenCalledWith("submit_ranking", {
@@ -80,6 +84,31 @@ describe("submitRanking — identity", () => {
   it("never touches a service-role client — only lib/supabase/server's RLS client", async () => {
     await submitRanking(validInput());
     expect(createClient).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("submitRanking — identity (authenticated, Milestone 6)", () => {
+  beforeEach(() => {
+    getUser.mockResolvedValue({ data: { user: { id: USER_ID } }, error: null });
+  });
+
+  it("a signed-in caller never mints or sends a guest id — submit_ranking gets p_guest_id: undefined", async () => {
+    await submitRanking(validInput());
+    expect(ensureGuestId).not.toHaveBeenCalled();
+    expect(rpc).toHaveBeenCalledWith("submit_ranking", {
+      p_tierlist_id: GAME_ID,
+      p_items: [{ item_id: ITEM_ID, tier: "S", position: 0 }],
+      p_guest_id: undefined,
+    });
+  });
+
+  it("relies on the RLS client to carry the session — auth.uid() drives identity, not a client-supplied id", async () => {
+    // There is no user-id field anywhere in the input schema; confirm a
+    // caller cannot influence WHICH user they submit as even if they tried.
+    const result = await submitRanking(
+      validInput({ userId: "attacker-supplied-id" }),
+    );
+    expect(result).toEqual({ ok: false, reason: "invalid" }); // unknown field -> .strict() rejects it
   });
 });
 
@@ -120,6 +149,13 @@ describe("submitRanking — success and error mapping", () => {
 
   it("a failure establishing guest identity maps to network and never calls the RPC", async () => {
     ensureGuestId.mockRejectedValue(new Error("cookie store unavailable"));
+    const result = await submitRanking(validInput());
+    expect(result).toEqual({ ok: false, reason: "network" });
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it("a failure checking auth state maps to network and never calls the RPC", async () => {
+    getUser.mockRejectedValue(new Error("auth service unavailable"));
     const result = await submitRanking(validInput());
     expect(result).toEqual({ ok: false, reason: "network" });
     expect(rpc).not.toHaveBeenCalled();
