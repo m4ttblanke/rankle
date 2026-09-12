@@ -438,6 +438,27 @@ Prevent:
 - Duplicate friendships
 - Invalid transitions
 
+**As built (Milestone 7):** `friend_requests` has no status column — a row
+existing means "pending," full stop. Accept creates the `friendships` row and
+deletes the request in one operation; decline and cancel (sender-only
+retraction, distinct from decline) just delete it. No accepted/declined
+history is retained. `friendships` is a single canonically-ordered pair per
+relationship (`user_id_low < user_id_high`), never directional rows — a
+friendship is symmetric by construction, not by convention. A mutual
+near-simultaneous request (A→B while B→A is already pending) resolves
+deterministically into exactly one friendship via a
+`pg_advisory_xact_lock`-serialized check inside `send_friend_request`, never
+two pending rows. See `supabase/migrations/20260912200000_friends.sql` and
+`docs/SECURITY.md` sec 6/24.
+
+Discovery is `/friends`' search box, calling `search_profiles` (authenticated
+only, username-prefix match, capped at 20, excludes the caller, returns only
+`id/username/display_name/avatar_url` plus a computed relationship label). A
+public `/profile/[username]` for arbitrary other users remains out of scope
+(unchanged from Milestone 6) — a friend's identity is visible only through
+this search RPC, `list_friend_requests` (pending-request counterpart), or a
+direct `profiles` read once actually friends (see `docs/SECURITY.md` sec 6a).
+
 ---
 
 ## 17. Friend Activity
@@ -449,6 +470,15 @@ Before today's submission, a user may see non-spoiler activity such as:
 Do not reveal who ranked what.
 
 After both users submit, comparison becomes available.
+
+**As built (Milestone 7):** `get_friend_played_status(tierlist_id)` returns
+only `{ user_id, played: boolean }` per friend — never ranking data, never
+tier/position fields, so it's safe to call before the caller's own
+submission. `/friends` shows it per-row ("Played today" / "Hasn't played
+yet") for the current live game only; `/` shows a single spoiler-safe count
+line ("N friends played today") above the ranking board for a signed-in
+player with friends, using the same RPC. A signed-out visitor never triggers
+this call.
 
 ---
 
@@ -466,6 +496,20 @@ Keep this visually fun and concise.
 
 Avoid turning it into a complex statistical report.
 
+**As built (Milestone 7):** a "Friends" section on `/results` (after "Your
+hottest take," before "Challenge a friend"), populated by
+`get_friend_results(tierlist_id)` — requires the caller to have already
+submitted, returns a ranking only for friends who have ALSO submitted (see
+sec 19 below and `docs/SECURITY.md` sec 24 for the exact access rule). Each
+row shows: a literal same-placement count ("Same placement on N of M" —
+including a shared N/A, honestly labeled as a literal match, not an opinion
+agreement, same convention as Milestone 5's share comparison), the weighted
+agreement percentage (sec 19), and the single biggest jointly-scored
+disagreement as a pair of tier chips. A signed-out guest never sees this
+section at all (not an empty state — the section itself is omitted, since
+friends are account-only). Zero qualifying friends renders "No friends have
+played today's Rankle yet."
+
 ---
 
 ## 19. Compatibility
@@ -477,6 +521,23 @@ Use a deterministic similarity metric.
 The score should be easy to explain.
 
 Do not build a recommendation engine or social graph algorithm prematurely.
+
+**As built (Milestone 7) — per-game only, not persisted:** for every item
+where BOTH sides gave a scored (non-`N/A`) opinion tier, `agreement = 1 -
+|weightA - weightB| / maxDiff` (`maxDiff` = the opinion-tier weight range,
+4 for the canonical S..F scale); the game's agreement is the average across
+those jointly-scored items, rounded to a whole percent. `N/A` is excluded
+entirely — never treated as agreement, never as a numeric opinion, and an
+`N/A`/`N/A` pair on the same item is simply not counted (it still counts
+toward the separate literal same-placement number, sec 18, but never toward
+this percentage). Zero jointly-scored items → no percentage at all ("Not
+enough shared ratings"), never a fabricated 0% or 100%. Computed on read from
+the two immutable rankings (`lib/game/friend-compatibility.ts`, reusing
+Milestone 5's `compareRankings` rather than a second comparison
+implementation) — never persisted, and explicitly labeled "X% agreement
+today" (a single game's number), never a permanent "compatibility score."
+Cumulative multi-game head-to-head (`/friends/[username]`) was considered and
+deferred — see `docs/TODO.md`.
 
 ---
 

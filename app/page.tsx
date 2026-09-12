@@ -2,7 +2,9 @@ import { redirect } from "next/navigation";
 import { NoGameToday } from "@/components/game/empty-state";
 import { RankingBoard } from "@/components/game/ranking-board";
 import { AppHeader } from "@/components/layout/app-header";
+import { getCurrentUser } from "@/lib/auth/current-user";
 import { getDailyGame } from "@/lib/game/get-daily-game";
+import { getFriendPlayedStatus } from "@/lib/game/friends";
 import { getGuestId } from "@/lib/game/guest";
 import { getShare } from "@/lib/game/get-share";
 import { shareTokenSchema } from "@/lib/game/share-schema";
@@ -80,6 +82,15 @@ export default async function HomePage({ searchParams }: Props) {
     }
   }
 
+  // Spoiler-safe, pre-submission friend activity count (docs/MANUAL.md sec
+  // 17: "5 friends played today" — a count only, never who or what they
+  // ranked). Account-only and only worth a fetch when there's a game to ask
+  // about; a signed-out visitor never triggers this call at all.
+  const friendsPlayedCount =
+    game && (await getCurrentUser())
+      ? (await getFriendPlayedStatus(game.id)).filter((f) => f.played).length
+      : null;
+
   return (
     <>
       <AppHeader />
@@ -92,6 +103,11 @@ export default async function HomePage({ searchParams }: Props) {
               </h1>
               {game.prompt ? (
                 <p className="text-sm text-muted sm:text-base">{game.prompt}</p>
+              ) : null}
+              {friendsPlayedCount ? (
+                <p className="text-xs font-medium text-muted">
+                  {friendsPlayedCount} friend{friendsPlayedCount === 1 ? "" : "s"} played today
+                </p>
               ) : null}
             </div>
             <RankingBoard game={game} shareToken={shareToken} />

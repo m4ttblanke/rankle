@@ -134,15 +134,15 @@ Periodically clean up old completed items.
 
 ## Friends
 
-- [ ] Create friend-request model
-- [ ] Create friendship model
-- [ ] Prevent self/duplicate requests
-- [ ] Build friend search
-- [ ] Build request inbox
-- [ ] Add accept/decline
-- [ ] Add remove friend
-- [ ] Add spoiler-safe friend activity count
-- [ ] Add post-submission friend ranking comparison
+- [x] Create friend-request model (Milestone 7 — pending-only, no status column)
+- [x] Create friendship model (Milestone 7 — canonical unordered pair)
+- [x] Prevent self/duplicate requests (Milestone 7)
+- [x] Build friend search (Milestone 7 — `search_profiles`)
+- [x] Build request inbox (Milestone 7 — `/friends`, `list_friend_requests`)
+- [x] Add accept/decline (Milestone 7 — plus sender-side cancel)
+- [x] Add remove friend (Milestone 7)
+- [x] Add spoiler-safe friend activity count (Milestone 7 — `get_friend_played_status`)
+- [x] Add post-submission friend ranking comparison (Milestone 7 — `/results` Friends section)
 
 ## Product Analytics
 
@@ -161,9 +161,14 @@ Periodically clean up old completed items.
 
 ## Social
 
-- [ ] Define compatibility score
-- [ ] Add compatibility tests
-- [ ] Add friend compatibility UI
+- [x] Define compatibility score (Milestone 7 — per-game weighted agreement,
+  N/A excluded, never persisted; see `docs/MANUAL.md` sec 19)
+- [x] Add compatibility tests (Milestone 7 — `lib/game/friend-compatibility.test.ts`)
+- [x] Add friend compatibility UI (Milestone 7 — `/results` Friends section)
+- [ ] Add cumulative multi-game head-to-head (`/friends/[username]`) — deferred
+  from Milestone 7 to keep scope to "friend-specific results on today's
+  /results plus friends management." Would need new aggregation across
+  historical submissions; revisit only if there's real demand.
 - [ ] Add simple reactions
 - [ ] Add internal share-to-friends flow
 - [ ] Add optional groups
@@ -282,7 +287,8 @@ Track unresolved product choices here until decided.
 - [ ] Whether archived games can be played by guests
 - [ ] Exact consensus formula
 - [ ] Exact controversy formula
-- [ ] Exact compatibility formula
+- [x] Exact compatibility formula — per-game weighted agreement, N/A
+  excluded, never persisted (Milestone 7, `docs/MANUAL.md` sec 19)
 - [ ] Whether dark mode launches in MVP
 - [ ] Whether item images are required or optional per game
 
@@ -595,3 +601,86 @@ Follow-ups it surfaced:
   `docs/DEPLOY.md`'s Local Supabase section for the symptom/fix). Not a
   product bug, just a local-dev-environment note now documented so it isn't
   re-discovered the hard way.
+
+## Milestone 7 — friends (2026-09-12)
+
+Two new tables (`friend_requests`, `friendships`) plus eight new RPCs,
+delivered in one migration
+(`supabase/migrations/20260912200000_friends.sql`). `friend_requests` has
+**no status column** — a persisted row can only ever mean "pending"; accept
+creates the `friendships` row and deletes the request in the same call,
+decline/cancel just delete it, and no accepted/declined history is retained
+(a deliberate simplification beyond the milestone brief's own illustrative
+schema, approved before implementation). `friendships` is a single
+canonically-ordered pair per relationship (`user_id_low < user_id_high`,
+enforced by a `check` constraint) — symmetric by construction, never
+directional rows. Every mutating RPC (`send_/accept_/decline_/cancel_friend_request`,
+`remove_friend`) takes a `pg_advisory_xact_lock` on the sorted pair before
+touching either table, closing the "A and B request each other at the same
+moment" race deterministically: `send_friend_request` detects an existing
+reverse-pending row and converts it straight into a friendship rather than
+creating a second pending row in the other direction.
+
+**Profile visibility was tightened, not just extended.** `profiles`' one
+existing RLS policy let any authenticated user read every profile's safe
+columns directly (`using (true)`) — true since Milestone 1, unused by any
+code path, but the first thing Friends makes into a live full-enumeration
+bypass of the new capped/prefix `search_profiles` RPC. Approved and replaced
+with `profiles_select_self_or_friend` (self, an accepted friend, or admin)
+as part of this milestone rather than left as a deferred item —
+`docs/TODO.md`'s own "Security (deferred)" list had already flagged exactly
+this gap. A pending request's counterpart is deliberately *not* covered by
+that policy; `list_friend_requests()` is the one audited reader for that
+relationship instead of a further-widened table policy.
+
+`private.has_submitted_by(tierlist_id, user_id)` — a parameterized,
+claim-aware sibling of the existing `private.has_submitted` — is the one
+place "has this arbitrary user submitted this game, direct or claimed"
+lives, shared by `get_friend_played_status` (boolean-only, safe
+pre-submission) and `get_friend_results` (the actual comparison reader,
+which additionally requires the CALLER to have submitted before returning
+anything, and only ever iterates the caller's own `friendships` rows so a
+non-friend can never appear). Compatibility
+(`lib/game/friend-compatibility.ts`) reuses Milestone 5's `compareRankings`
+rather than a second comparison implementation — it only adds the weighted
+per-game agreement percentage (N/A excluded, `null` when there are zero
+jointly-scored items) and a "biggest disagreement" pick on top of that
+existing output.
+
+New routes: `/friends` (search, incoming/outgoing requests, friends list with
+per-friend played-today status and an inline-confirm remove — no modal,
+matching the ranking board's own confirm pattern). `/results` gained a
+Friends section (after "Your hottest take," before "Challenge a friend"),
+visible only to signed-in callers (a guest gets no section at all, not an
+empty one). `/` gained a single spoiler-safe "N friends played today" line
+above the board for a signed-in player with friends.
+
+328 Vitest (64 new: `friend-compatibility.test.ts` (10), `friends-schema.test.ts`
+(12), six Server Action test files (39: send/accept/decline/cancel/remove/
+search), and a real-two-user `friends.integration.test.ts` (3) — mirrors
+`claim-guest-submissions.integration.test.ts`'s approach: genuine
+`auth.admin.createUser` + `generateLink` + `verifyOtp` sessions, no email
+mocked — covering search, the full request lifecycle, symmetric friendship
+visibility/removal, and the full played-status/friend-results access matrix.
+4 new Playwright specs (`e2e/friends.spec.ts`) drive two real signed-in
+browser sessions through the entire loop: search → request → accept → both
+submit → comparison appears on `/results` → unfriend hides it immediately —
+plus confirms anonymous play, community results, and sharing are all
+unaffected. `supabase/tests/rls_spec.sql` grew from 110 to 190 assertions,
+all passing, including the corrected profile-visibility assertions (a
+non-friend authenticated user now sees only their own row; admin still sees
+every row) and the full friend-request race/ownership/idempotency matrix.
+Full regression suite (72 Playwright, unchanged specs), lint, typecheck, and
+a production build all green; `/friends` renders `ƒ` (server-rendered on
+demand), same as every other account-sensitive route.
+
+Follow-ups it surfaced:
+
+- [ ] Cumulative multi-game head-to-head (`/friends/[username]`) explicitly
+  deferred — see the Social section above.
+- [ ] No rate limiting on `search_profiles` / friend-request creation yet
+  (docs/SECURITY.md sec 19 already treats this as a "when needed" item, same
+  as every other RPC in this project).
+- [ ] `IncomingRequestRow`/`OutgoingRequestRow`/`FriendRow` don't move focus
+  anywhere after an accept/decline/cancel/remove completes — same deferred
+  class of heading/focus-management issue noted in M4-M6.

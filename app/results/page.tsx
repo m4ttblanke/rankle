@@ -1,7 +1,9 @@
 import { redirect } from "next/navigation";
 import { ResultsView } from "@/components/results/results-view";
 import { AppHeader } from "@/components/layout/app-header";
+import { getCurrentUser } from "@/lib/auth/current-user";
 import { getDailyGame } from "@/lib/game/get-daily-game";
+import { getFriendResults } from "@/lib/game/get-friend-results";
 import { getGuestId } from "@/lib/game/guest";
 import { getResults } from "@/lib/game/get-results";
 import { hasSubmittedRanking } from "@/lib/game/submission-state";
@@ -35,10 +37,16 @@ export default async function ResultsPage() {
   const results = await getResults(game.id, guestId);
   if (!results) redirect("/");
 
+  // Friends is account-only (Milestone 7) -- a signed-out guest gets `null`
+  // (ResultsView skips the section entirely for them), never an empty state
+  // implying "you have no friends."
+  const user = await getCurrentUser();
+  const friendResults = user ? await getFriendResults(game.id) : null;
+
   return (
     <>
       <AppHeader />
-      <ResultsView results={results} />
+      <ResultsView results={results} friendResults={friendResults} />
     </>
   );
 }

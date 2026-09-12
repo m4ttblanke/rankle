@@ -4,10 +4,12 @@ import {
   hottestTake,
   isEarlyResults,
 } from "@/lib/game/results";
+import type { FriendResultEntry } from "@/lib/game/get-friend-results";
 import type { GameResults } from "@/lib/game/results-schema";
 import { ShareButton } from "@/components/share/share-button";
 import { CommunityTierList } from "./community-tier-list";
 import { ComparisonList } from "./comparison-list";
+import { FriendsComparison } from "./friends-comparison";
 import { HottestTakeCard } from "./hottest-take-card";
 import { ResultsHeading } from "./results-heading";
 
@@ -19,7 +21,17 @@ import { ResultsHeading } from "./results-heading";
  * (folded inline into the comparison rows rather than a separate dashboard
  * section — docs/DESIGN.md sec 16, sec 17).
  */
-export function ResultsView({ results }: { results: GameResults }) {
+export function ResultsView({
+  results,
+  friendResults,
+}: {
+  results: GameResults;
+  /** `null` for a signed-out visitor (guest or anonymous) -- the Friends
+   *  section is account-only and is skipped entirely rather than shown
+   *  empty. An empty array is the normal "no friends have played yet" state
+   *  for a signed-in caller, and IS rendered. */
+  friendResults: FriendResultEntry[] | null;
+}) {
   const { tierlist, items, myRanking, totalSubmissions } = results;
   const early = isEarlyResults(results);
   const tierList = communityTierList(items, tierlist.tierConfig);
@@ -82,6 +94,18 @@ export function ResultsView({ results }: { results: GameResults }) {
           </p>
         ) : null}
       </section>
+
+      {friendResults !== null ? (
+        <section aria-labelledby="friends-heading" className="flex flex-col gap-3">
+          <h2
+            id="friends-heading"
+            className="font-display text-xl font-extrabold text-foreground"
+          >
+            Friends
+          </h2>
+          <FriendsComparison friends={friendResults} results={results} />
+        </section>
+      ) : null}
 
       <section aria-labelledby="share-heading" className="flex flex-col gap-3">
         <h2

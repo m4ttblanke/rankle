@@ -144,6 +144,13 @@ $$;
 
 update public.profiles set is_admin = true where id = 'aaaaaaaa-0000-0000-0000-000000000001';
 
+-- Friendly, literal usernames (auto-generated `user_<hex>` otherwise) so the
+-- Milestone 7 search_profiles/list_friend_requests assertions below can
+-- assert on human-readable prefixes instead of derived hex fragments.
+update public.profiles set username = 'alice' where id = 'aaaaaaaa-0000-0000-0000-000000000001';
+update public.profiles set username = 'bob'   where id = 'bbbbbbbb-0000-0000-0000-000000000002';
+update public.profiles set username = 'carol' where id = 'cccccccc-0000-0000-0000-000000000003';
+
 insert into public.tierlists (id, slug, title, status, release_date, tier_config, created_by)
 values
   ('11111111-1111-1111-1111-111111111111', 'live-game', 'Live Game', 'live',
@@ -255,15 +262,23 @@ select pg_temp.expect_err('anon has no SELECT on submission_items',    'anon', n
 select pg_temp.expect_err('anon has no SELECT on shares',              'anon', null, 'select 1 from public.shares', '42501');
 select pg_temp.expect_err('anon has no SELECT on profiles (profile change)', 'anon', null, 'select 1 from public.profiles', '42501');
 
--- authenticated profile reads: allowed, but is_admin column is not
+-- authenticated profile reads: is_admin column is never selectable, and
+-- (Milestone 7) direct table reads are narrowed to self / accepted friend /
+-- admin -- NOT "any authenticated user, any row" as before M7. Full-graph
+-- discovery is search_profiles()'s job now (section 9 below); this proves the
+-- raw table can no longer be used to enumerate every account.
 do $$
 begin
-  perform pg_temp.rec('authed CAN read safe profile columns',
+  perform pg_temp.rec('authed with no relationships sees only their OWN profile row (M7 narrowing)',
     (pg_temp.eval_as('authenticated', 'cccccccc-0000-0000-0000-000000000003',
+      'select to_jsonb(count(*)) from public.profiles')) = '1'::jsonb);
+  perform pg_temp.rec('admin still sees every profile row directly',
+    (pg_temp.eval_as('authenticated', 'aaaaaaaa-0000-0000-0000-000000000001',
       'select to_jsonb(count(*)) from public.profiles')) = '3'::jsonb);
 end;
 $$;
 select pg_temp.expect_err('authed cannot read profiles.is_admin column', 'authenticated', 'cccccccc-0000-0000-0000-000000000003', 'select is_admin from public.profiles limit 1', '42501');
+select pg_temp.expect_err('anon still has no SELECT on profiles at all (unchanged by M7)', 'anon', null, 'select 1 from public.profiles', '42501');
 
 -- =====================================================================
 -- 3. admin authorization on official content
@@ -650,6 +665,9 @@ values
   ('dddddddd-0000-0000-0000-000000000004', 'authenticated', 'authenticated', 'dave@rankle.test',  now(), now(), now()),
   ('eeeeeeee-0000-0000-0000-000000000005', 'authenticated', 'authenticated', 'erin@rankle.test',  now(), now(), now());
 
+update public.profiles set username = 'dave' where id = 'dddddddd-0000-0000-0000-000000000004';
+update public.profiles set username = 'erin' where id = 'eeeeeeee-0000-0000-0000-000000000005';
+
 do $$
 declare
   g_dave       uuid := '0f000000-0000-0000-0000-0000000000d1'; -- dave's one guest identity, plays two games
@@ -836,6 +854,411 @@ begin
       format('select public.claim_guest_submissions(%L, %L)', erin, g_dave)) = '42501');
   perform pg_temp.rec('F: dave''s claimed rows are unaffected by erin''s attempt',
     (select count(*) from public.claimed_guest_submissions where user_id = dave) = 2);
+end;
+$$;
+
+-- =====================================================================
+-- 9. friends (Milestone 7)
+-- =====================================================================
+do $$
+declare
+  bob        uuid := 'bbbbbbbb-0000-0000-0000-000000000002';
+  carol      uuid := 'cccccccc-0000-0000-0000-000000000003';
+  dave       uuid := 'dddddddd-0000-0000-0000-000000000004';
+  erin       uuid := 'eeeeeeee-0000-0000-0000-000000000005';
+  live_game  uuid := '11111111-1111-1111-1111-111111111111';
+  na_game    uuid := '44444444-4444-4444-4444-444444444444';
+  r          jsonb;
+  req_id     uuid;
+  bob_dave_req uuid;
+  i          int;
+  uid        uuid;
+begin
+  -- ---- self-request blocked ------------------------------------------
+  perform pg_temp.rec('send_friend_request: cannot request yourself',
+    pg_temp.run_as('authenticated', bob, format('select public.send_friend_request(%L)', bob)) = '23514');
+
+  perform pg_temp.rec('send_friend_request: sign-in required (anon)',
+    pg_temp.run_as('anon', null, format('select public.send_friend_request(%L)', bob)) = '42501');
+
+  -- ---- duplicate pending request is idempotent, not an error ----------
+  r := pg_temp.eval_as('authenticated', bob, format('select public.send_friend_request(%L)', carol));
+  perform pg_temp.rec('send_friend_request: bob -> carol creates a pending request', (r ->> 'status') = 'pending', r::text);
+
+  r := pg_temp.eval_as('authenticated', bob, format('select public.send_friend_request(%L)', carol));
+  perform pg_temp.rec('send_friend_request: duplicate bob -> carol is idempotent, no error', (r ->> 'status') = 'already_pending', r::text);
+
+  perform pg_temp.rec('friend_requests: exactly one bob->carol row exists despite the duplicate call',
+    (select count(*) from public.friend_requests where sender_id = bob and recipient_id = carol) = 1);
+
+  -- ---- unrelated / wrong-side actions on the pending request -----------
+  select id into req_id from public.friend_requests where sender_id = bob and recipient_id = carol;
+
+  perform pg_temp.rec('accept_friend_request: sender (bob) cannot accept their own outgoing request',
+    pg_temp.run_as('authenticated', bob, format('select public.accept_friend_request(%L)', req_id)) = '42501');
+  perform pg_temp.rec('accept_friend_request: an unrelated user (dave) cannot accept it',
+    pg_temp.run_as('authenticated', dave, format('select public.accept_friend_request(%L)', req_id)) = '42501');
+  perform pg_temp.rec('decline_friend_request: an unrelated user (dave) cannot decline it',
+    pg_temp.run_as('authenticated', dave, format('select public.decline_friend_request(%L)', req_id)) = '42501');
+  perform pg_temp.rec('cancel_friend_request: the recipient (carol) cannot cancel it (only the sender can)',
+    pg_temp.run_as('authenticated', carol, format('select public.cancel_friend_request(%L)', req_id)) = '42501');
+  perform pg_temp.rec('cancel_friend_request: an unrelated user (dave) cannot cancel it',
+    pg_temp.run_as('authenticated', dave, format('select public.cancel_friend_request(%L)', req_id)) = '42501');
+
+  -- ---- recipient accepts: creates exactly one friendship, deletes the row
+  perform pg_temp.rec('accept_friend_request: recipient (carol) CAN accept',
+    pg_temp.eval_as('authenticated', carol, format('select to_jsonb(public.accept_friend_request(%L))', req_id)) = 'true'::jsonb);
+  perform pg_temp.rec('accept: the friend_requests row is gone (no retained history)',
+    not exists (select 1 from public.friend_requests where id = req_id));
+  perform pg_temp.rec('accept: exactly one friendships row now exists for bob/carol',
+    (select count(*) from public.friendships where user_id_low = least(bob, carol) and user_id_high = greatest(bob, carol)) = 1);
+  perform pg_temp.rec('accept_friend_request: repeating on the same (now-gone) request id is a safe no-op',
+    pg_temp.eval_as('authenticated', carol, format('select to_jsonb(public.accept_friend_request(%L))', req_id)) = 'false'::jsonb);
+  perform pg_temp.rec('accept: the no-op repeat did not remove the existing friendship',
+    (select count(*) from public.friendships where user_id_low = least(bob, carol) and user_id_high = greatest(bob, carol)) = 1);
+
+  -- ---- existing friendship: a new request just reports "friends" -------
+  r := pg_temp.eval_as('authenticated', bob, format('select public.send_friend_request(%L)', carol));
+  perform pg_temp.rec('send_friend_request: already-friends short-circuits to status=friends, no new pending row',
+    (r ->> 'status') = 'friends', r::text);
+  perform pg_temp.rec('send_friend_request: still exactly one friendships row (no duplicate)',
+    (select count(*) from public.friendships where user_id_low = least(bob, carol) and user_id_high = greatest(bob, carol)) = 1);
+  perform pg_temp.rec('send_friend_request: no stray pending row was created by the already-friends call',
+    not exists (select 1 from public.friend_requests where (sender_id, recipient_id) in ((bob, carol), (carol, bob))));
+
+  -- ---- friendships: symmetric visibility, no enumeration by outsiders --
+  perform pg_temp.rec('friendships: carol (the other participant) can also see the row',
+    pg_temp.eval_as('authenticated', carol,
+      format('select to_jsonb((select count(*) from public.friendships where user_id_low = %L and user_id_high = %L))',
+        least(bob, carol), greatest(bob, carol))) = '1'::jsonb);
+  perform pg_temp.rec('friendships: an unrelated user (dave) cannot see the bob/carol row at all',
+    pg_temp.eval_as('authenticated', dave,
+      format('select to_jsonb((select count(*) from public.friendships where user_id_low = %L and user_id_high = %L))',
+        least(bob, carol), greatest(bob, carol))) = '0'::jsonb);
+  perform pg_temp.rec('profiles (M7): now that bob/carol are friends, carol can directly read bob''s profile row',
+    pg_temp.eval_as('authenticated', carol,
+      format('select to_jsonb((select count(*) from public.profiles where id = %L))', bob)) = '1'::jsonb);
+
+  -- ---- either side can remove; removal is symmetric and immediate ------
+  perform pg_temp.rec('remove_friend: carol can remove the friendship',
+    pg_temp.eval_as('authenticated', carol, format('select to_jsonb(public.remove_friend(%L))', bob)) = 'true'::jsonb);
+  perform pg_temp.rec('remove_friend: the friendships row is actually gone',
+    not exists (select 1 from public.friendships where user_id_low = least(bob, carol) and user_id_high = greatest(bob, carol)));
+  perform pg_temp.rec('remove_friend: repeating removal is a safe idempotent no-op',
+    pg_temp.eval_as('authenticated', bob, format('select to_jsonb(public.remove_friend(%L))', carol)) = 'false'::jsonb);
+  perform pg_temp.rec('profiles (M7): after unfriending, carol can no longer read bob''s profile row directly',
+    pg_temp.eval_as('authenticated', carol,
+      format('select to_jsonb((select count(*) from public.profiles where id = %L))', bob)) = '0'::jsonb);
+
+  -- ---- sender can cancel an unresolved outgoing request -----------------
+  perform pg_temp.rec('setup: fresh bob -> carol request for the cancel test',
+    pg_temp.run_as('authenticated', bob, format('select public.send_friend_request(%L)', carol)) is null);
+  select id into req_id from public.friend_requests where sender_id = bob and recipient_id = carol;
+  perform pg_temp.rec('cancel_friend_request: sender (bob) can cancel their own pending request',
+    pg_temp.eval_as('authenticated', bob, format('select to_jsonb(public.cancel_friend_request(%L))', req_id)) = 'true'::jsonb);
+  perform pg_temp.rec('cancel: the request row is gone',
+    not exists (select 1 from public.friend_requests where id = req_id));
+  perform pg_temp.rec('cancel: no friendship was created by canceling',
+    not exists (select 1 from public.friendships where user_id_low = least(bob, carol) and user_id_high = greatest(bob, carol)));
+
+  -- ---- cancel after accept cannot delete an existing friendship ---------
+  perform pg_temp.rec('setup: fresh bob -> carol request, this time accepted',
+    pg_temp.run_as('authenticated', bob, format('select public.send_friend_request(%L)', carol)) is null);
+  select id into req_id from public.friend_requests where sender_id = bob and recipient_id = carol;
+  perform pg_temp.rec('setup: carol accepts it',
+    pg_temp.eval_as('authenticated', carol, format('select to_jsonb(public.accept_friend_request(%L))', req_id)) = 'true'::jsonb);
+  perform pg_temp.rec('cancel_friend_request: calling cancel on the now-accepted (gone) request id is a safe no-op',
+    pg_temp.eval_as('authenticated', bob, format('select to_jsonb(public.cancel_friend_request(%L))', req_id)) = 'false'::jsonb);
+  perform pg_temp.rec('cancel-after-accept: the friendship this created is untouched',
+    (select count(*) from public.friendships where user_id_low = least(bob, carol) and user_id_high = greatest(bob, carol)) = 1);
+
+  -- reset: remove the bob/carol friendship so later sections (search_profiles
+  -- relationship labels, list_friend_requests, played-status/results) can
+  -- exercise a fresh "not yet friends" pending request between them again.
+  perform pg_temp.rec('reset: remove bob/carol friendship before reusing this pair for later sections',
+    pg_temp.eval_as('authenticated', carol, format('select to_jsonb(public.remove_friend(%L))', bob)) = 'true'::jsonb);
+
+  -- ---- decline: no friendship is created --------------------------------
+  perform pg_temp.rec('setup: dave -> erin request for the decline test',
+    pg_temp.run_as('authenticated', dave, format('select public.send_friend_request(%L)', erin)) is null);
+  select id into req_id from public.friend_requests where sender_id = dave and recipient_id = erin;
+  perform pg_temp.rec('decline_friend_request: recipient (erin) CAN decline',
+    pg_temp.eval_as('authenticated', erin, format('select to_jsonb(public.decline_friend_request(%L))', req_id)) = 'true'::jsonb);
+  perform pg_temp.rec('decline: the request row is gone (no retained history)',
+    not exists (select 1 from public.friend_requests where id = req_id));
+  perform pg_temp.rec('decline: no friendship was created',
+    not exists (select 1 from public.friendships where user_id_low = least(dave, erin) and user_id_high = greatest(dave, erin)));
+
+  -- ---- mutual/reverse pending request resolves deterministically into
+  --      exactly ONE friendship, not two pending rows in each direction ---
+  perform pg_temp.rec('setup: dave -> erin request (fresh, after the decline above)',
+    pg_temp.run_as('authenticated', dave, format('select public.send_friend_request(%L)', erin)) is null);
+  r := pg_temp.eval_as('authenticated', erin, format('select public.send_friend_request(%L)', dave));
+  perform pg_temp.rec('send_friend_request: erin -> dave while dave -> erin is pending resolves to ONE friendship',
+    (r ->> 'status') = 'friends', r::text);
+  perform pg_temp.rec('mutual race: exactly one friendships row for dave/erin',
+    (select count(*) from public.friendships where user_id_low = least(dave, erin) and user_id_high = greatest(dave, erin)) = 1);
+  perform pg_temp.rec('mutual race: no pending friend_requests rows remain in EITHER direction',
+    not exists (select 1 from public.friend_requests where (sender_id, recipient_id) in ((dave, erin), (erin, dave))));
+
+  -- =====================================================================
+  -- search_profiles
+  -- =====================================================================
+  perform pg_temp.rec('search_profiles: anonymous cannot call it at all',
+    pg_temp.run_as('anon', null, 'select public.search_profiles(''car'')') = '42501');
+
+  r := pg_temp.eval_as('authenticated', bob, 'select public.search_profiles(''car'')');
+  perform pg_temp.rec('search_profiles: prefix match finds carol',
+    jsonb_array_length(r -> 'results') = 1 and (r -> 'results' -> 0 ->> 'username') = 'carol', r::text);
+
+  r := pg_temp.eval_as('authenticated', bob, 'select public.search_profiles(''CAR'')');
+  perform pg_temp.rec('search_profiles: query is case-normalized',
+    jsonb_array_length(r -> 'results') = 1 and (r -> 'results' -> 0 ->> 'username') = 'carol', r::text);
+
+  r := pg_temp.eval_as('authenticated', bob, 'select public.search_profiles(''zzz-does-not-exist'')');
+  perform pg_temp.rec('search_profiles: no match -> empty results, not an error',
+    (r -> 'results') = '[]'::jsonb, r::text);
+
+  r := pg_temp.eval_as('authenticated', bob, 'select public.search_profiles(''c'')');
+  perform pg_temp.rec('search_profiles: below the minimum query length -> empty results',
+    (r -> 'results') = '[]'::jsonb, r::text);
+
+  r := pg_temp.eval_as('authenticated', bob, format('select public.search_profiles(%L)', substr(bob::text, 1, 3)));
+  perform pg_temp.rec('search_profiles: excludes the caller themselves even on a self-matching prefix',
+    not exists (
+      select 1 from jsonb_array_elements(r -> 'results') e where (e ->> 'id') = bob::text
+    ), r::text);
+
+  r := pg_temp.eval_as('authenticated', bob, 'select public.search_profiles(''carol'')');
+  perform pg_temp.rec('search_profiles: returns only safe columns (no is_admin/email/private fields)',
+    (r -> 'results' -> 0) ?& array['id','username','display_name','avatar_url','relationship']
+    and not ((r -> 'results' -> 0) ? 'is_admin')
+    and not ((r -> 'results' -> 0) ? 'email'), r::text);
+
+  -- dave and erin are friends (from the mutual-race resolution above)
+  r := pg_temp.eval_as('authenticated', dave, 'select public.search_profiles(''erin'')');
+  perform pg_temp.rec('search_profiles: relationship reflects an existing friendship',
+    (r -> 'results' -> 0 ->> 'relationship') = 'friends', r::text);
+
+  perform pg_temp.rec('setup: bob -> carol pending request for the relationship-label test',
+    pg_temp.run_as('authenticated', bob, format('select public.send_friend_request(%L)', carol)) is null);
+  r := pg_temp.eval_as('authenticated', bob, 'select public.search_profiles(''carol'')');
+  perform pg_temp.rec('search_profiles: relationship reflects a pending OUTGOING request',
+    (r -> 'results' -> 0 ->> 'relationship') = 'pending_outgoing', r::text);
+  r := pg_temp.eval_as('authenticated', carol, 'select public.search_profiles(''bob'')');
+  perform pg_temp.rec('search_profiles: relationship reflects a pending INCOMING request',
+    (r -> 'results' -> 0 ->> 'relationship') = 'pending_incoming', r::text);
+
+  -- ---- result cap: prefix-match more than the cap, get back exactly the cap
+  for i in 1..25 loop
+    uid := ('f0000000-0000-0000-0000-0000000000' || lpad(i::text, 2, '0'))::uuid;
+    insert into auth.users (id, aud, role, email, email_confirmed_at, created_at, updated_at)
+    values (uid, 'authenticated', 'authenticated', 'capuser' || i || '@rankle.test', now(), now(), now());
+    update public.profiles set username = 'capuser' || lpad(i::text, 2, '0') where id = uid;
+  end loop;
+
+  r := pg_temp.eval_as('authenticated', bob, 'select public.search_profiles(''capuser'')');
+  perform pg_temp.rec('search_profiles: 25 matches are capped at 20, not an unbounded scan',
+    jsonb_array_length(r -> 'results') = 20, 'len=' || jsonb_array_length(r -> 'results')::text);
+
+  -- ---- list_friend_requests: incoming/outgoing, pending-counterpart identity
+  select id into bob_dave_req from public.friend_requests where sender_id = bob and recipient_id = carol;
+
+  r := pg_temp.eval_as('authenticated', carol, 'select public.list_friend_requests()');
+  perform pg_temp.rec('list_friend_requests: carol sees bob''s request in INCOMING',
+    jsonb_array_length(r -> 'incoming') = 1
+    and (r -> 'incoming' -> 0 -> 'user' ->> 'username') = 'bob', r::text);
+  perform pg_temp.rec('list_friend_requests: carol has nothing OUTGOING',
+    (r -> 'outgoing') = '[]'::jsonb, r::text);
+
+  r := pg_temp.eval_as('authenticated', bob, 'select public.list_friend_requests()');
+  perform pg_temp.rec('list_friend_requests: bob sees his own request to carol in OUTGOING',
+    jsonb_array_length(r -> 'outgoing') = 1
+    and (r -> 'outgoing' -> 0 -> 'user' ->> 'username') = 'carol', r::text);
+
+  -- clean up that pending request so it doesn't leak into later assertions
+  perform pg_temp.run_as('authenticated', bob, format('select public.cancel_friend_request(%L)', bob_dave_req));
+
+  perform pg_temp.rec('list_friend_requests: sign-in required',
+    pg_temp.run_as('anon', null, 'select public.list_friend_requests()') = '42501');
+
+end;
+$$;
+
+do $$
+declare
+  bob        uuid := 'bbbbbbbb-0000-0000-0000-000000000002';
+  carol      uuid := 'cccccccc-0000-0000-0000-000000000003';
+  dave       uuid := 'dddddddd-0000-0000-0000-000000000004';
+  erin       uuid := 'eeeeeeee-0000-0000-0000-000000000005';
+  live_game  uuid := '11111111-1111-1111-1111-111111111111';
+  na_game    uuid := '44444444-4444-4444-4444-444444444444';
+  r          jsonb;
+  req_id     uuid;
+begin
+  -- bob & carol: friends again (for played-status + "friend but hasn't
+  -- submitted" friend-results coverage below)
+  perform pg_temp.rec('setup: bob -> carol request (played-status/results section)',
+    pg_temp.run_as('authenticated', bob, format('select public.send_friend_request(%L)', carol)) is null);
+  select id into req_id from public.friend_requests where sender_id = bob and recipient_id = carol;
+  perform pg_temp.rec('setup: carol accepts',
+    pg_temp.eval_as('authenticated', carol, format('select to_jsonb(public.accept_friend_request(%L))', req_id)) = 'true'::jsonb);
+
+  -- bob & dave: friends (dave has a CLAIMED live_game submission, section 8)
+  perform pg_temp.rec('setup: bob -> dave request',
+    pg_temp.run_as('authenticated', bob, format('select public.send_friend_request(%L)', dave)) is null);
+  select id into req_id from public.friend_requests where sender_id = bob and recipient_id = dave;
+  perform pg_temp.rec('setup: dave accepts',
+    pg_temp.eval_as('authenticated', dave, format('select to_jsonb(public.accept_friend_request(%L))', req_id)) = 'true'::jsonb);
+
+  -- erin submits live_game directly, but is NOT bob's friend -- proves
+  -- "both submitted but not friends -> no data" distinctly from mere absence
+  perform pg_temp.rec('setup: erin submits live_game directly (not friends with bob)',
+    pg_temp.run_as('authenticated', erin, format(
+      'select public.submit_ranking(%L, %L::jsonb, null)', live_game,
+      '[{"item_id":"10000000-0000-0000-0000-0000000000a1","tier":"A","position":0},'
+      || '{"item_id":"10000000-0000-0000-0000-0000000000b1","tier":"B","position":0},'
+      || '{"item_id":"10000000-0000-0000-0000-0000000000c1","tier":"C","position":0}]')) is null);
+
+  r := pg_temp.eval_as('authenticated', bob, format('select public.get_friend_played_status(%L)', live_game));
+  perform pg_temp.rec('get_friend_played_status: bob''s friend dave (submitted, claimed) shows played=true',
+    exists (select 1 from jsonb_array_elements(r -> 'friends') e where (e ->> 'user_id') = dave::text and (e ->> 'played') = 'true'),
+    r::text);
+  perform pg_temp.rec('get_friend_played_status: bob''s friend carol (not submitted) shows played=false',
+    exists (select 1 from jsonb_array_elements(r -> 'friends') e where (e ->> 'user_id') = carol::text and (e ->> 'played') = 'false'),
+    r::text);
+  perform pg_temp.rec('get_friend_played_status: non-friend erin never appears at all',
+    not exists (select 1 from jsonb_array_elements(r -> 'friends') e where (e ->> 'user_id') = erin::text),
+    r::text);
+  perform pg_temp.rec('get_friend_played_status: boolean-only, no ranking/tier data anywhere in the payload',
+    r::text not ilike '%tier%' and r::text not ilike '%position%');
+  perform pg_temp.rec('get_friend_played_status: sign-in required',
+    pg_temp.run_as('anon', null, format('select public.get_friend_played_status(%L)', live_game)) = '42501');
+  -- safe to call BEFORE the caller's own submission (carol hasn't submitted live_game)
+  perform pg_temp.rec('get_friend_played_status: callable by carol, who has not submitted live_game herself',
+    pg_temp.run_as('authenticated', carol, format('select public.get_friend_played_status(%L)', live_game)) is null);
+
+  -- =====================================================================
+  -- get_friend_results -- the spoiler-gated comparison reader
+  -- =====================================================================
+  perform pg_temp.rec('get_friend_results: caller (carol) who has NOT submitted live_game is refused',
+    pg_temp.run_as('authenticated', carol, format('select public.get_friend_results(%L)', live_game)) = '42501');
+  perform pg_temp.rec('get_friend_results: sign-in required',
+    pg_temp.run_as('anon', null, format('select public.get_friend_results(%L)', live_game)) = '42501');
+
+  r := pg_temp.eval_as('authenticated', bob, format('select public.get_friend_results(%L)', live_game));
+  perform pg_temp.rec('get_friend_results: bob (submitted) sees dave''s (claimed submission) ranking',
+    exists (
+      select 1 from jsonb_array_elements(r -> 'friends') e
+      where (e -> 'user' ->> 'id') = dave::text and jsonb_array_length(e -> 'ranking') = 3
+    ), r::text);
+  perform pg_temp.rec('get_friend_results: friend carol (hasn''t submitted) is OMITTED entirely',
+    not exists (select 1 from jsonb_array_elements(r -> 'friends') e where (e -> 'user' ->> 'id') = carol::text),
+    r::text);
+  perform pg_temp.rec('get_friend_results: erin (submitted, but not a friend) is OMITTED entirely',
+    not exists (select 1 from jsonb_array_elements(r -> 'friends') e where (e -> 'user' ->> 'id') = erin::text),
+    r::text);
+
+  r := pg_temp.eval_as('authenticated', dave, format('select public.get_friend_results(%L)', live_game));
+  perform pg_temp.rec('get_friend_results: dave (claimed submission counts as his own submitting) sees bob''s ranking',
+    exists (
+      select 1 from jsonb_array_elements(r -> 'friends') e
+      where (e -> 'user' ->> 'id') = bob::text and jsonb_array_length(e -> 'ranking') = 3
+    ), r::text);
+
+  -- N/A preserved verbatim -- dave & erin are friends (mutual-race section
+  -- above) and BOTH have a na_game submission (dave's is claimed, erin's is
+  -- direct) that includes an N/A placement.
+  r := pg_temp.eval_as('authenticated', dave, format('select public.get_friend_results(%L)', na_game));
+  perform pg_temp.rec('get_friend_results: N/A is preserved verbatim in a friend''s ranking, not coerced to a numeric tier',
+    exists (
+      select 1
+      from jsonb_array_elements(r -> 'friends') e,
+           jsonb_array_elements(e -> 'ranking') item
+      where (e -> 'user' ->> 'id') = erin::text and (item ->> 'tier') = 'N/A'
+    ), r::text);
+
+  -- removal takes effect immediately: unfriend bob & dave, dave disappears
+  perform pg_temp.rec('setup: bob removes dave as a friend',
+    pg_temp.eval_as('authenticated', bob, format('select to_jsonb(public.remove_friend(%L))', dave)) = 'true'::jsonb);
+  r := pg_temp.eval_as('authenticated', bob, format('select public.get_friend_results(%L)', live_game));
+  perform pg_temp.rec('get_friend_results: after unfriending, the former friend (dave) no longer appears',
+    not exists (select 1 from jsonb_array_elements(r -> 'friends') e where (e -> 'user' ->> 'id') = dave::text),
+    r::text);
+end;
+$$;
+
+-- =====================================================================
+-- 10. friend RPC privilege catalog check (Milestone 7 correction)
+--
+-- A STATIC assertion against pg_proc's actual ACL, not a runtime call. A
+-- runtime "anon gets 42501" check only proves a function's OWN internal
+-- auth.uid() guard works -- it says nothing about whether anon actually holds
+-- EXECUTE at the grant level. On this project's remote database, a
+-- schema-level default privilege grants EXECUTE on every new `public`
+-- function directly to anon/authenticated/service_role at creation time
+-- (confirmed via pg_default_acl) -- a clean local stack has no such default,
+-- so a runtime-only check can never catch this class of drift locally. This
+-- catalog check encodes the intended grant state directly, so it fails
+-- immediately (locally) if a future migration ever reintroduces the mistake
+-- `20260912210000_harden_friend_rpc_grants.sql` corrected: revoking only from
+-- `public` (the pseudo-role) when a named role's default-ACL grant needs an
+-- explicit revoke of its own.
+-- =====================================================================
+do $$
+declare
+  v_anon_leaks     text;
+  v_missing_auth   text;
+begin
+  select string_agg(routine_name, ', ' order by routine_name)
+    into v_anon_leaks
+  from information_schema.routine_privileges
+  where routine_schema = 'public'
+    and grantee = 'anon'
+    and routine_name in (
+      'search_profiles', 'list_friend_requests', 'send_friend_request',
+      'accept_friend_request', 'decline_friend_request', 'cancel_friend_request',
+      'remove_friend', 'get_friend_played_status', 'get_friend_results'
+    );
+  perform pg_temp.rec(
+    'privilege catalog: anon has NO EXECUTE on any authenticated-only friend RPC',
+    v_anon_leaks is null,
+    coalesce('anon can execute: ' || v_anon_leaks, '')
+  );
+
+  select string_agg(fn, ', ' order by fn) into v_missing_auth
+  from unnest(array[
+    'search_profiles', 'list_friend_requests', 'send_friend_request',
+    'accept_friend_request', 'decline_friend_request', 'cancel_friend_request',
+    'remove_friend', 'get_friend_played_status', 'get_friend_results'
+  ]) as fn
+  where not exists (
+    select 1 from information_schema.routine_privileges
+    where routine_schema = 'public' and routine_name = fn and grantee = 'authenticated'
+  );
+  perform pg_temp.rec(
+    'privilege catalog: authenticated HAS EXECUTE on every friend RPC',
+    v_missing_auth is null,
+    coalesce('missing for: ' || v_missing_auth, '')
+  );
+
+  -- private.* helpers remain internal-only: no anon/authenticated grant at all.
+  perform pg_temp.rec(
+    'privilege catalog: private.has_submitted_by has no anon/authenticated EXECUTE',
+    not exists (
+      select 1 from information_schema.routine_privileges
+      where routine_schema = 'private' and routine_name = 'has_submitted_by'
+        and grantee in ('anon', 'authenticated')
+    )
+  );
+  perform pg_temp.rec(
+    'privilege catalog: private.lock_friend_pair has no anon/authenticated EXECUTE',
+    not exists (
+      select 1 from information_schema.routine_privileges
+      where routine_schema = 'private' and routine_name = 'lock_friend_pair'
+        and grantee in ('anon', 'authenticated')
+    )
+  );
 end;
 $$;
 

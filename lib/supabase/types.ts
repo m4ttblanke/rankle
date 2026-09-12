@@ -15,30 +15,10 @@ export type Json =
   | Json[]
 
 export type Database = {
-  graphql_public: {
-    Tables: {
-      [_ in never]: never
-    }
-    Views: {
-      [_ in never]: never
-    }
-    Functions: {
-      graphql: {
-        Args: {
-          extensions?: Json
-          operationName?: string
-          query?: string
-          variables?: Json
-        }
-        Returns: Json
-      }
-    }
-    Enums: {
-      [_ in never]: never
-    }
-    CompositeTypes: {
-      [_ in never]: never
-    }
+  // Allows to automatically instantiate createClient with right options
+  // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
+  __InternalSupabase: {
+    PostgrestVersion: "14.5"
   }
   public: {
     Tables: {
@@ -72,6 +52,75 @@ export type Database = {
           {
             foreignKeyName: "claimed_guest_submissions_user_id_fkey"
             columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      friend_requests: {
+        Row: {
+          created_at: string
+          id: string
+          recipient_id: string
+          sender_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          recipient_id: string
+          sender_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          recipient_id?: string
+          sender_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "friend_requests_recipient_id_fkey"
+            columns: ["recipient_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "friend_requests_sender_id_fkey"
+            columns: ["sender_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      friendships: {
+        Row: {
+          created_at: string
+          user_id_high: string
+          user_id_low: string
+        }
+        Insert: {
+          created_at?: string
+          user_id_high: string
+          user_id_low: string
+        }
+        Update: {
+          created_at?: string
+          user_id_high?: string
+          user_id_low?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "friendships_user_id_high_fkey"
+            columns: ["user_id_high"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "friendships_user_id_low_fkey"
+            columns: ["user_id_low"]
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id"]
@@ -370,6 +419,14 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      accept_friend_request: {
+        Args: { p_request_id: string }
+        Returns: boolean
+      }
+      cancel_friend_request: {
+        Args: { p_request_id: string }
+        Returns: boolean
+      }
       claim_guest_submissions: {
         Args: { p_guest_id: string; p_user_id: string }
         Returns: number
@@ -378,6 +435,15 @@ export type Database = {
         Args: { p_guest_id?: string; p_submission_id: string }
         Returns: string
       }
+      decline_friend_request: {
+        Args: { p_request_id: string }
+        Returns: boolean
+      }
+      get_friend_played_status: {
+        Args: { p_tierlist_id: string }
+        Returns: Json
+      }
+      get_friend_results: { Args: { p_tierlist_id: string }; Returns: Json }
       get_results: {
         Args: { p_guest_id?: string; p_tierlist_id: string }
         Returns: Json
@@ -390,6 +456,10 @@ export type Database = {
         Args: { p_guest_id?: string; p_tierlist_id: string }
         Returns: boolean
       }
+      list_friend_requests: { Args: never; Returns: Json }
+      remove_friend: { Args: { p_user_id: string }; Returns: boolean }
+      search_profiles: { Args: { p_query: string }; Returns: Json }
+      send_friend_request: { Args: { p_recipient_id: string }; Returns: Json }
       submit_ranking: {
         Args: { p_guest_id?: string; p_items: Json; p_tierlist_id: string }
         Returns: string
@@ -522,11 +592,7 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
-  graphql_public: {
-    Enums: {},
-  },
   public: {
     Enums: {},
   },
 } as const
-

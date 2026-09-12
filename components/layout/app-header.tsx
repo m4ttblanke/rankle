@@ -23,6 +23,12 @@ export async function AppHeader() {
       {profile ? (
         <nav className="flex items-center gap-3 text-xs">
           <Link
+            href="/friends"
+            className="font-semibold text-foreground underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-accent"
+          >
+            Friends
+          </Link>
+          <Link
             href="/profile"
             className="font-semibold text-foreground underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-accent"
           >

@@ -167,6 +167,48 @@ Only involved users may read/act on the request.
 
 Only participants should access private friendship details.
 
+**As built (Milestone 7):** `friend_requests` has **no direct client grant at
+all** (like `shares`) — every read goes through `list_friend_requests()`
+(returns the caller's own incoming/outgoing rows plus the counterpart's safe
+profile fields), every write through `send_/accept_/decline_/cancel_friend_request()`.
+Each mutating RPC derives the caller from `auth.uid()` and independently
+verifies the relevant role: only the recipient may accept/decline, only the
+sender may cancel, and a self-request is rejected by both the RPC and a
+`friend_requests_not_self` check constraint. No generic "create a friendship
+between arbitrary users" RPC exists — a `friendships` row is created only
+inside `send_friend_request` (resolving a mutual near-simultaneous request)
+or `accept_friend_request`, both scoped to a party the caller actually is.
+`friendships` itself has a direct `select` grant, RLS-restricted to the two
+participants (or admin) — writes remain RPC-only (`remove_friend`, which
+either participant may call). Concurrent mutations between the same two users
+are serialized with `pg_advisory_xact_lock` inside every mutating function,
+closing the race windows a purely UI-level disable state cannot (see
+`supabase/migrations/20260912200000_friends.sql`).
+
+**Profile visibility narrowed for M7:** `profiles_select_authenticated`
+(`using (true)` — any signed-in user could read every profile's safe columns
+directly) is replaced by `profiles_select_self_or_friend`: self, an accepted
+friend (via `friendships`), or admin. Nothing in the app depended on the
+broader grant before this milestone (`get_share`/history/search all resolved
+identity via RPC or the caller's own row), and `docs/TODO.md`'s "Security
+(deferred)" list had already flagged it as a gap to close once friend
+discovery existed. A pending request's counterpart is deliberately **not**
+part of this policy — that identity is exposed through exactly one audited
+path, `list_friend_requests()`, rather than widening raw table access to a
+relationship that isn't a friendship yet. `search_profiles()` (below) remains
+the only way to discover an unrelated user at all; the tightened table policy
+cannot be bypassed by a raw PostgREST call the way the old one could.
+
+### Profile Search
+
+`search_profiles(p_query)` is the only arbitrary-user discovery mechanism
+(**as built, Milestone 7**): `SECURITY DEFINER`, `authenticated`-only grant
+(no `anon`), requires a 2+ character query, prefix match only (no leading
+wildcard), capped at 20 rows, excludes the caller, and returns only
+`id/username/display_name/avatar_url` plus a computed relationship label —
+never `is_admin`, never email, never a raw count of all users, never a
+"browse all users" path.
+
 ### Admin Content
 
 Normal users must not create or modify official games.
@@ -580,6 +622,31 @@ Before both users submit a game:
 - Do not reveal actual rankings
 
 Public profile visibility does not imply all friend activity is public.
+
+**As built (Milestone 7) — the friend-results access rule:** user U may see
+friend F's ranking for tierlist T only if (1) U and F are currently friends,
+(2) U has an official submission for T, and (3) F has an official submission
+for T. All three are enforced inside `get_friend_results()` itself
+(`SECURITY DEFINER`) — condition (2) raises `insufficient_privilege` before
+anything else runs; the friend query only ever iterates the caller's own
+`friendships` rows (so a non-friend can never appear), and condition (3) is
+an inline filter (so a friend who hasn't submitted is simply omitted, not
+returned with empty data). Claimed guest submissions
+(`claimed_guest_submissions`, Milestone 6) count as either side's own,
+exactly as `get_results` already treats them — `private.has_submitted_by`
+(a parameterized, claim-aware sibling of `private.has_submitted`) is the one
+place that logic lives, shared by both the results reader and
+`get_friend_played_status`. Removing a friendship takes effect immediately:
+every call re-derives the friend list fresh from `friendships`, so there is
+no cached/stale state to invalidate. `get_friend_played_status` is the one
+deliberate exception to "no data before submission" — it returns a boolean
+only (never ranking/tier data), which `docs/MANUAL.md` sec 17 explicitly
+allows pre-submission.
+
+Friendship itself never bypasses the Milestone 5 share-link spoiler gate — a
+friend receiving a share link still must submit their own ranking before the
+share unlocks, same as any other recipient (`docs/MANUAL.md` sec 21,
+unchanged by this milestone).
 
 ---
 
