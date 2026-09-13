@@ -107,6 +107,65 @@ begin
 end;
 $$;
 
+-- M8 fixture helper: mirrors submit_ranking's write path (insert submission +
+-- items, update tierlist_item_stats with the same N/A-exclusion rule) but
+-- skips the "must be the CURRENT game" gate. Runs as the file owner (bypasses
+-- RLS, same convention as every other fixture in this file).
+--
+-- Needed because na-game / teardown-game are deliberately dated in the past
+-- to represent "yesterday's Rankle" fixtures for claim/teardown/aggregate
+-- tests below. Under M8's tightened submit_ranking (section 11), a game with
+-- an older release_date than the current live-game can no longer accept a
+-- new official submission through the real RPC -- by design, that is exactly
+-- what M8 fixes. These fixtures still need real submission + aggregate rows
+-- to exercise the OTHER features built on top of them, so they're created
+-- directly rather than through the now-appropriately-narrower RPC.
+create or replace function pg_temp.fixture_submit(
+  p_tierlist_id uuid,
+  p_user_id     uuid,
+  p_guest_id    uuid,
+  p_items       jsonb
+)
+returns uuid
+language plpgsql as $$
+declare
+  v_tl     public.tierlists%rowtype;
+  v_sub_id uuid;
+begin
+  select * into v_tl from public.tierlists where id = p_tierlist_id;
+
+  insert into public.submissions (tierlist_id, user_id, guest_id)
+  values (p_tierlist_id, p_user_id, p_guest_id)
+  returning id into v_sub_id;
+
+  insert into public.submission_items (submission_id, tierlist_item_id, tier, position)
+  select v_sub_id, (e ->> 'item_id')::uuid, (e ->> 'tier'), (e ->> 'position')::integer
+  from jsonb_array_elements(p_items) e;
+
+  insert into public.tierlist_item_stats (tierlist_item_id, tierlist_id)
+  select si.tierlist_item_id, p_tierlist_id
+  from public.submission_items si
+  where si.submission_id = v_sub_id
+  on conflict (tierlist_item_id) do nothing;
+
+  update public.tierlist_item_stats s
+  set
+    tier_counts = jsonb_set(
+      s.tier_counts, array[si.tier],
+      to_jsonb(coalesce((s.tier_counts ->> si.tier)::integer, 0) + 1), true
+    ),
+    total_submissions = s.total_submissions + case when si.tier = 'N/A' then 0 else 1 end,
+    sum_weight = s.sum_weight
+      + case when si.tier = 'N/A' then 0 else private.tier_weight(v_tl.tier_config, si.tier) end,
+    updated_at = now()
+  from public.submission_items si
+  where si.submission_id = v_sub_id
+    and s.tierlist_item_id = si.tierlist_item_id;
+
+  return v_sub_id;
+end;
+$$;
+
 -- harness sanity: SET ROLE must actually work, or role-scoped tests are meaningless
 do $$
 begin
@@ -150,6 +209,74 @@ update public.profiles set is_admin = true where id = 'aaaaaaaa-0000-0000-0000-0
 update public.profiles set username = 'alice' where id = 'aaaaaaaa-0000-0000-0000-000000000001';
 update public.profiles set username = 'bob'   where id = 'bbbbbbbb-0000-0000-0000-000000000002';
 update public.profiles set username = 'carol' where id = 'cccccccc-0000-0000-0000-000000000003';
+
+-- =====================================================================
+-- M8: day-rollover demonstration for current_daily_game_id() / get_daily_game()
+--     / the tightened submit_ranking(). Deliberately run FIRST and on an
+--     otherwise-empty tierlists table (before the main fixture block below),
+--     because current_daily_game_id() always resolves the GLOBAL
+--     most-recently-released game -- proving "A is current, B releases, A is
+--     superseded, B becomes current" honestly requires A and B to be the
+--     only candidates at each check, not competing with live-game's
+--     always-wins today() date. The scratch rows are truncated away
+--     immediately after so they cannot interfere with any later section.
+-- =====================================================================
+do $$
+declare
+  day_a  uuid := '0a000000-0000-0000-0000-0000000000a1';
+  day_b  uuid := '0a000000-0000-0000-0000-0000000000b1';
+  item_a uuid := '0a000000-0000-0000-0000-0000000000a2';
+  item_b uuid := '0a000000-0000-0000-0000-0000000000b2';
+begin
+  insert into public.tierlists (id, slug, title, status, release_date, tier_config)
+  values (day_a, 'm8-day-a', 'M8 Day A', 'scheduled', private.today() - 3,
+    '["S","A","B","C","F","N/A"]'::jsonb);
+  insert into public.tierlist_items (id, tierlist_id, label, sort_order)
+  values (item_a, day_a, 'Only Item', 0);
+
+  perform pg_temp.rec('day-rollover: A is current while it is the only released game',
+    (pg_temp.eval_as('anon', null, 'select public.get_daily_game()') ->> 'slug') = 'm8-day-a');
+
+  perform pg_temp.rec('day-rollover: A accepts a submission while it is current',
+    pg_temp.run_as('anon', null, format(
+      'select public.submit_ranking(%L, %L::jsonb, %L)', day_a,
+      '[{"item_id":"' || item_a || '","tier":"S","position":0}]',
+      '0a000000-0000-0000-0000-0000000000e1')) is null);
+
+  -- game B releases (its release_date is more recent than A's, but still
+  -- <= today -- an already-released historical date, not a future one)
+  insert into public.tierlists (id, slug, title, status, release_date, tier_config)
+  values (day_b, 'm8-day-b', 'M8 Day B', 'scheduled', private.today() - 1,
+    '["S","A","B","C","F","N/A"]'::jsonb);
+  insert into public.tierlist_items (id, tierlist_id, label, sort_order)
+  values (item_b, day_b, 'Only Item', 0);
+
+  perform pg_temp.rec('day-rollover: B becomes current the moment it releases',
+    (pg_temp.eval_as('anon', null, 'select public.get_daily_game()') ->> 'slug') = 'm8-day-b');
+  perform pg_temp.rec('day-rollover: admin (alice) resolves the SAME current game as anon',
+    (pg_temp.eval_as('authenticated', 'aaaaaaaa-0000-0000-0000-000000000001',
+      'select public.get_daily_game()') ->> 'slug') = 'm8-day-b');
+  perform pg_temp.rec('day-rollover: a non-admin authenticated user (bob) also resolves the SAME current game',
+    (pg_temp.eval_as('authenticated', 'bbbbbbbb-0000-0000-0000-000000000002',
+      'select public.get_daily_game()') ->> 'slug') = 'm8-day-b');
+
+  perform pg_temp.rec('day-rollover: A can no longer accept a NEW official submission once B is current (23001)',
+    pg_temp.run_as('anon', null, format(
+      'select public.submit_ranking(%L, %L::jsonb, %L)', day_a,
+      '[{"item_id":"' || item_a || '","tier":"A","position":0}]',
+      '0a000000-0000-0000-0000-0000000000e2')) = '23001');
+
+  perform pg_temp.rec('day-rollover: B (now the most recent) accepts a submission',
+    pg_temp.run_as('anon', null, format(
+      'select public.submit_ranking(%L, %L::jsonb, %L)', day_b,
+      '[{"item_id":"' || item_b || '","tier":"S","position":0}]',
+      '0a000000-0000-0000-0000-0000000000e3')) is null);
+end;
+$$;
+
+-- clear the day-rollover scratch rows (cascades submissions/items too) so the
+-- main fixture block below starts from a clean slate.
+truncate table public.tierlists cascade;
 
 insert into public.tierlists (id, slug, title, status, release_date, tier_config, created_by)
 values
@@ -415,11 +542,20 @@ $$;
 --     (isolated on its own game so it never perturbs live-game's
 --     total_submissions counts, which sections 4b/6 rely on).
 -- =====================================================================
-select pg_temp.expect_ok('N/A submit (valid, complete)', 'anon', null,
-  'select public.submit_ranking(''44444444-4444-4444-4444-444444444444'',
-     ''[{"item_id":"40000000-0000-0000-0000-0000000000a4","tier":"N/A","position":0},
-        {"item_id":"40000000-0000-0000-0000-0000000000b4","tier":"S","position":0}]''::jsonb,
-     ''0f000000-0000-0000-0000-000000000005'')');
+-- na-game predates live-game (see M8 section 11), so it's no longer the
+-- CURRENT game -- fixture_submit() sets up the same submission + aggregate
+-- state submit_ranking would have produced, without going through the now
+-- current-game-gated RPC (see the helper's own comment above).
+do $$
+begin
+  perform pg_temp.rec('N/A submit (valid, complete)',
+    pg_temp.fixture_submit(
+      '44444444-4444-4444-4444-444444444444', null, '0f000000-0000-0000-0000-000000000005',
+      '[{"item_id":"40000000-0000-0000-0000-0000000000a4","tier":"N/A","position":0},
+        {"item_id":"40000000-0000-0000-0000-0000000000b4","tier":"S","position":0}]'::jsonb
+    ) is not null);
+end;
+$$;
 
 do $$
 begin
@@ -435,11 +571,16 @@ $$;
 -- a second submission stacks the N/A count without ever touching
 -- total_submissions/sum_weight -- proves it is not a one-off skip but a
 -- standing exclusion.
-select pg_temp.expect_ok('second N/A submit (different guest)', 'anon', null,
-  'select public.submit_ranking(''44444444-4444-4444-4444-444444444444'',
-     ''[{"item_id":"40000000-0000-0000-0000-0000000000a4","tier":"N/A","position":0},
-        {"item_id":"40000000-0000-0000-0000-0000000000b4","tier":"F","position":0}]''::jsonb,
-     ''0f000000-0000-0000-0000-000000000006'')');
+do $$
+begin
+  perform pg_temp.rec('second N/A submit (different guest)',
+    pg_temp.fixture_submit(
+      '44444444-4444-4444-4444-444444444444', null, '0f000000-0000-0000-0000-000000000006',
+      '[{"item_id":"40000000-0000-0000-0000-0000000000a4","tier":"N/A","position":0},
+        {"item_id":"40000000-0000-0000-0000-0000000000b4","tier":"F","position":0}]'::jsonb
+    ) is not null);
+end;
+$$;
 
 do $$
 begin
@@ -523,22 +664,29 @@ $$;
 select pg_temp.expect_err('authed user has no DELETE on submissions', 'authenticated', 'bbbbbbbb-0000-0000-0000-000000000002',
   'delete from public.submissions where user_id = ''bbbbbbbb-0000-0000-0000-000000000002''', '42501');
 
--- game teardown still cascades (UPDATE-only trigger, not DELETE)
+-- M8 changes this: pre-M8, tierlists had an UPDATE-only immutability
+-- posture and DELETE cascaded freely once submissions existed. M8's
+-- historical-lock trigger (section 12) now blocks DELETE too, so a
+-- submitted tierlist's data can never be cascade-deleted. teardown-game
+-- predates live-game, so its fixture submission goes through
+-- fixture_submit() rather than the real RPC (see that helper's comment /
+-- section 11) -- this block is about deletion, not submission eligibility.
 do $$
 declare got text;
 begin
-  perform set_config('request.jwt.claims', NULL, true);  -- ensure guest path
-  perform public.submit_ranking('33333333-3333-3333-3333-333333333333',
-    '[{"item_id":"30000000-0000-0000-0000-0000000000a3","tier":"S","position":0}]'::jsonb,
-    '0f000000-0000-0000-0000-000000000003');
+  perform pg_temp.fixture_submit('33333333-3333-3333-3333-333333333333', null,
+    '0f000000-0000-0000-0000-000000000003',
+    '[{"item_id":"30000000-0000-0000-0000-0000000000a3","tier":"S","position":0}]'::jsonb);
+
   begin
     delete from public.tierlists where id = '33333333-3333-3333-3333-333333333333';
     got := 'ok';
   exception when others then got := sqlstate;
   end;
-  perform pg_temp.rec('game teardown cascades despite immutability trigger', got = 'ok', 'got ' || got);
-  perform pg_temp.rec('teardown removed its submissions',
-    (select count(*) = 0 from public.submissions where tierlist_id = '33333333-3333-3333-3333-333333333333'));
+  perform pg_temp.rec('M8: tierlist DELETE is now blocked once it has official submissions (23001)',
+    got = '23001', 'got ' || got);
+  perform pg_temp.rec('M8: the blocked deletion left the submission intact (no cascade into real data)',
+    (select count(*) = 1 from public.submissions where tierlist_id = '33333333-3333-3333-3333-333333333333'));
 end;
 $$;
 
@@ -707,12 +855,15 @@ begin
       || '{"item_id":"10000000-0000-0000-0000-0000000000c1","tier":"F","position":0}]',
       g_dave)) is null);
 
+  -- na-game predates live-game, so it is no longer the CURRENT game under
+  -- M8's tightened submit_ranking -- this is fixture setup for the claim
+  -- mechanics below, not a test of submission eligibility, so it uses
+  -- fixture_submit() (see that helper's comment / section 11).
   perform pg_temp.rec('setup: dave-as-guest submits na-game (historical)',
-    pg_temp.run_as('anon', null, format(
-      'select public.submit_ranking(%L, %L::jsonb, %L)', na_game,
-      '[{"item_id":"40000000-0000-0000-0000-0000000000a4","tier":"S","position":0},'
-      || '{"item_id":"40000000-0000-0000-0000-0000000000b4","tier":"N/A","position":0}]',
-      g_dave)) is null);
+    pg_temp.fixture_submit(na_game, null, g_dave,
+      ('[{"item_id":"40000000-0000-0000-0000-0000000000a4","tier":"S","position":0},'
+      || '{"item_id":"40000000-0000-0000-0000-0000000000b4","tier":"N/A","position":0}]')::jsonb
+    ) is not null);
 
   select id into sub_dave_live from public.submissions
     where tierlist_id = live_game and guest_id = g_dave;
@@ -817,17 +968,16 @@ begin
   --        a different guest also submitted na-game; claiming that guest
   --        must NOT touch erin's game -------------------------------------
   perform pg_temp.rec('setup: erin submits na-game directly (authenticated)',
-    pg_temp.run_as('authenticated', erin, format(
-      'select public.submit_ranking(%L, %L::jsonb, null)', na_game,
-      '[{"item_id":"40000000-0000-0000-0000-0000000000a4","tier":"A","position":0},'
-      || '{"item_id":"40000000-0000-0000-0000-0000000000b4","tier":"N/A","position":0}]')) is null);
+    pg_temp.fixture_submit(na_game, erin, null,
+      ('[{"item_id":"40000000-0000-0000-0000-0000000000a4","tier":"A","position":0},'
+      || '{"item_id":"40000000-0000-0000-0000-0000000000b4","tier":"N/A","position":0}]')::jsonb
+    ) is not null);
 
   perform pg_temp.rec('setup: a different guest also submits na-game',
-    pg_temp.run_as('anon', null, format(
-      'select public.submit_ranking(%L, %L::jsonb, %L)', na_game,
-      '[{"item_id":"40000000-0000-0000-0000-0000000000a4","tier":"F","position":0},'
-      || '{"item_id":"40000000-0000-0000-0000-0000000000b4","tier":"S","position":0}]',
-      g_erin_conf)) is null);
+    pg_temp.fixture_submit(na_game, null, g_erin_conf,
+      ('[{"item_id":"40000000-0000-0000-0000-0000000000a4","tier":"F","position":0},'
+      || '{"item_id":"40000000-0000-0000-0000-0000000000b4","tier":"S","position":0}]')::jsonb
+    ) is not null);
 
   select id into sub_erin_na from public.submissions where tierlist_id = na_game and user_id = erin;
   select id into sub_guest_na from public.submissions where tierlist_id = na_game and guest_id = g_erin_conf;
@@ -1259,6 +1409,367 @@ begin
         and grantee in ('anon', 'authenticated')
     )
   );
+end;
+$$;
+
+-- =====================================================================
+-- 11. current_daily_game_id() / get_daily_game() resolver consistency
+--     (dynamic day-rollover proof already ran above, right after fixtures
+--     were truncated; this section checks resolver consistency against the
+--     MAIN fixture set: live-game today, future-game +30d, teardown-game and
+--     na-game both dated in the past and both superseded by live-game).
+-- =====================================================================
+select pg_temp.expect_err('is_admin_user: anon cannot call it at all', 'anon', null,
+  'select public.is_admin_user()', '42501');
+do $$
+begin
+  perform pg_temp.rec('is_admin_user: admin (alice) gets true',
+    pg_temp.eval_as('authenticated', 'aaaaaaaa-0000-0000-0000-000000000001',
+      'select to_jsonb(public.is_admin_user())') = 'true'::jsonb);
+  perform pg_temp.rec('is_admin_user: non-admin (bob) gets false',
+    pg_temp.eval_as('authenticated', 'bbbbbbbb-0000-0000-0000-000000000002',
+      'select to_jsonb(public.is_admin_user())') = 'false'::jsonb);
+end;
+$$;
+
+do $$
+begin
+  perform pg_temp.rec('resolver: get_daily_game() returns live-game (the most recent released game)',
+    (pg_temp.eval_as('anon', null, 'select public.get_daily_game()') ->> 'slug') = 'live-game');
+  perform pg_temp.rec('resolver: admin (alice) resolves the identical current game as anon',
+    (pg_temp.eval_as('authenticated', 'aaaaaaaa-0000-0000-0000-000000000001',
+      'select public.get_daily_game()') ->> 'slug') = 'live-game');
+  perform pg_temp.rec('resolver: non-admin authenticated (bob) also resolves the identical current game',
+    (pg_temp.eval_as('authenticated', 'bbbbbbbb-0000-0000-0000-000000000002',
+      'select public.get_daily_game()') ->> 'slug') = 'live-game');
+  perform pg_temp.rec('resolver: a future scheduled game never becomes current early (get_daily_game != future-game)',
+    (pg_temp.eval_as('anon', null, 'select public.get_daily_game()') ->> 'slug') <> 'future-game');
+  perform pg_temp.rec(
+    'resolver: with no newer game than live-game, live-game remains current despite older na-game/teardown-game existing',
+    (pg_temp.eval_as('anon', null, 'select public.get_daily_game()') ->> 'slug') = 'live-game');
+end;
+$$;
+
+select pg_temp.expect_err('reject: submit to a superseded past game (na-game)', 'anon', null,
+  'select public.submit_ranking(''44444444-4444-4444-4444-444444444444'',
+     ''[{"item_id":"40000000-0000-0000-0000-0000000000a4","tier":"S","position":0},
+        {"item_id":"40000000-0000-0000-0000-0000000000b4","tier":"A","position":0}]''::jsonb,
+     ''0f000000-0000-0000-0000-0000000000ee'')', '23001');
+select pg_temp.expect_ok('current game (live-game) still accepts a fresh submission', 'anon', null,
+  'select public.submit_ranking(''11111111-1111-1111-1111-111111111111'',
+     ''[{"item_id":"10000000-0000-0000-0000-0000000000a1","tier":"S","position":0},
+        {"item_id":"10000000-0000-0000-0000-0000000000b1","tier":"A","position":0},
+        {"item_id":"10000000-0000-0000-0000-0000000000c1","tier":"B","position":0}]''::jsonb,
+     ''0f000000-0000-0000-0000-0000000000ef'')');
+
+-- =====================================================================
+-- 12. historical-lock triggers: tierlists / tierlist_items freeze completely
+--     once ANY official submission exists. na-game and teardown-game both
+--     have submissions by this point (sections 4c / 7 / this file's fixture
+--     setup); future-game has zero submissions and serves as the control.
+-- =====================================================================
+do $$
+declare got text;
+begin
+  -- ---- locked: na-game (has submissions) ------------------------------
+  begin
+    update public.tierlists set title = 'Hacked NA' where id = '44444444-4444-4444-4444-444444444444';
+    got := 'ok';
+  exception when others then got := sqlstate;
+  end;
+  perform pg_temp.rec('locked: UPDATE title on a submitted tierlist is blocked (23001)', got = '23001', 'got ' || got);
+
+  begin
+    update public.tierlists set tier_config = '["S","F"]'::jsonb
+      where id = '44444444-4444-4444-4444-444444444444';
+    got := 'ok';
+  exception when others then got := sqlstate;
+  end;
+  perform pg_temp.rec('locked: UPDATE tier_config on a submitted tierlist is blocked (23001)', got = '23001', 'got ' || got);
+
+  begin
+    insert into public.tierlist_items (tierlist_id, label, sort_order)
+      values ('44444444-4444-4444-4444-444444444444', 'Sneaky New Item', 99);
+    got := 'ok';
+  exception when others then got := sqlstate;
+  end;
+  perform pg_temp.rec('locked: INSERT item into a submitted tierlist is blocked (23001)', got = '23001', 'got ' || got);
+
+  begin
+    update public.tierlist_items set label = 'Renamed'
+      where id = '40000000-0000-0000-0000-0000000000a4';
+    got := 'ok';
+  exception when others then got := sqlstate;
+  end;
+  perform pg_temp.rec('locked: UPDATE (rename) an item on a submitted tierlist is blocked (23001)', got = '23001', 'got ' || got);
+
+  begin
+    update public.tierlist_items set sort_order = 5
+      where id = '40000000-0000-0000-0000-0000000000a4';
+    got := 'ok';
+  exception when others then got := sqlstate;
+  end;
+  perform pg_temp.rec('locked: reorder an item on a submitted tierlist is blocked (23001)', got = '23001', 'got ' || got);
+
+  begin
+    delete from public.tierlist_items where id = '40000000-0000-0000-0000-0000000000a4';
+    got := 'ok';
+  exception when others then got := sqlstate;
+  end;
+  perform pg_temp.rec('locked: DELETE an item on a submitted tierlist is blocked (23001)', got = '23001', 'got ' || got);
+
+  -- ---- control: future-game (zero submissions) remains fully editable --
+  update public.tierlists set title = 'Future Game Renamed'
+    where id = '22222222-2222-2222-2222-222222222222';
+  perform pg_temp.rec('control: UPDATE title on a zero-submission tierlist succeeds',
+    (select title = 'Future Game Renamed' from public.tierlists where id = '22222222-2222-2222-2222-222222222222'));
+end;
+$$;
+
+-- =====================================================================
+-- 13. lifecycle constraints: draft <-> release_date nullability
+-- =====================================================================
+-- Run as the file owner (bypasses grants entirely) so these isolate the
+-- CHECK constraint itself, not the (separately tested, section 15) column
+-- grants that would otherwise block release_date/status in an authenticated
+-- client's insert column list before the constraint is ever reached.
+do $$
+declare got text;
+begin
+  begin
+    insert into public.tierlists (slug, title, status, release_date)
+      values ('bad-draft', 'Bad Draft', 'draft', private.today() + 1);
+    got := 'ok';
+  exception when others then got := sqlstate;
+  end;
+  perform pg_temp.rec('constraint: a draft with a non-null release_date is rejected (23514)',
+    got = '23514', 'got ' || got);
+
+  begin
+    insert into public.tierlists (slug, title, status) values ('bad-scheduled', 'Bad Scheduled', 'scheduled');
+    got := 'ok';
+  exception when others then got := sqlstate;
+  end;
+  perform pg_temp.rec('constraint: a scheduled game with a null release_date is rejected (23514)',
+    got = '23514', 'got ' || got);
+end;
+$$;
+
+-- =====================================================================
+-- 14. admin RPCs: schedule / unschedule / duplicate / set_tierlist_items
+-- =====================================================================
+do $$
+declare
+  admin_id uuid := 'aaaaaaaa-0000-0000-0000-000000000001';
+  bob_id   uuid := 'bbbbbbbb-0000-0000-0000-000000000002';
+  draft_id uuid;
+  dup_id   uuid;
+  r        jsonb;
+begin
+  insert into public.tierlists (slug, title, status, created_by)
+  values ('m8-draft', 'M8 Draft', 'draft', admin_id)
+  returning id into draft_id;
+
+  -- ---- authorization -----------------------------------------------
+  perform pg_temp.rec('schedule_tierlist: non-admin (bob) cannot call it',
+    pg_temp.run_as('authenticated', bob_id,
+      format('select public.schedule_tierlist(%L, %L)', draft_id, (private.today() + 5)::text)) = '42501');
+  perform pg_temp.rec('schedule_tierlist: anon cannot call it',
+    pg_temp.run_as('anon', null,
+      format('select public.schedule_tierlist(%L, %L)', draft_id, (private.today() + 5)::text)) = '42501');
+
+  -- ---- validation -----------------------------------------------------
+  perform pg_temp.rec('schedule_tierlist: rejects a past date',
+    pg_temp.run_as('authenticated', admin_id,
+      format('select public.schedule_tierlist(%L, %L)', draft_id, (private.today() - 1)::text)) = '22023');
+  perform pg_temp.rec('schedule_tierlist: rejects a date already taken (live-game owns today)',
+    pg_temp.run_as('authenticated', admin_id,
+      format('select public.schedule_tierlist(%L, %L)', draft_id, private.today()::text)) = '23505');
+
+  -- ---- happy path + reschedule -----------------------------------------
+  r := pg_temp.eval_as('authenticated', admin_id,
+    format('select to_jsonb(public.schedule_tierlist(%L, %L))', draft_id, (private.today() + 5)::text));
+  perform pg_temp.rec('schedule_tierlist: admin schedules a free future date',
+    (r ->> 'status') = 'scheduled' and (r ->> 'release_date') = (private.today() + 5)::text, r::text);
+
+  r := pg_temp.eval_as('authenticated', admin_id,
+    format('select to_jsonb(public.schedule_tierlist(%L, %L))', draft_id, (private.today() + 6)::text));
+  perform pg_temp.rec('schedule_tierlist: reschedule to a different free date works',
+    (r ->> 'release_date') = (private.today() + 6)::text, r::text);
+
+  -- ---- unschedule -------------------------------------------------------
+  perform pg_temp.rec('unschedule_tierlist: non-admin cannot call it',
+    pg_temp.run_as('authenticated', bob_id,
+      format('select public.unschedule_tierlist(%L)', draft_id)) = '42501');
+  perform pg_temp.rec('unschedule_tierlist: live-game (already current, not future) cannot be unscheduled',
+    pg_temp.run_as('authenticated', admin_id,
+      'select public.unschedule_tierlist(''11111111-1111-1111-1111-111111111111'')') = 'P0002');
+
+  r := pg_temp.eval_as('authenticated', admin_id, format('select to_jsonb(public.unschedule_tierlist(%L))', draft_id));
+  perform pg_temp.rec('unschedule_tierlist: admin unschedules a future draft back to draft/null date',
+    (r ->> 'status') = 'draft' and (r ->> 'release_date') is null, r::text);
+
+  perform pg_temp.rec('unschedule_tierlist: calling it again on an already-draft game is rejected',
+    pg_temp.run_as('authenticated', admin_id,
+      format('select public.unschedule_tierlist(%L)', draft_id)) = 'P0002');
+
+  -- ---- duplicate_tierlist -------------------------------------------------
+  perform pg_temp.rec('duplicate_tierlist: non-admin cannot call it',
+    pg_temp.run_as('authenticated', bob_id,
+      'select public.duplicate_tierlist(''11111111-1111-1111-1111-111111111111'', ''bob-copy'')') = '42501');
+
+  r := pg_temp.eval_as('authenticated', admin_id,
+    'select to_jsonb(public.duplicate_tierlist(''11111111-1111-1111-1111-111111111111'', ''live-game-copy''))');
+  dup_id := (r ->> 'id')::uuid;
+  perform pg_temp.rec('duplicate_tierlist: result is a fresh draft with a new id, no release date',
+    dup_id is not null and dup_id <> '11111111-1111-1111-1111-111111111111'
+      and (r ->> 'status') = 'draft' and (r ->> 'release_date') is null, r::text);
+  perform pg_temp.rec('duplicate_tierlist: items were copied with fresh ids (same count, none overlapping source)',
+    (select count(*) from public.tierlist_items where tierlist_id = dup_id) = 3
+    and not exists (
+      select 1 from public.tierlist_items
+      where tierlist_id = dup_id
+        and id in (select id from public.tierlist_items where tierlist_id = '11111111-1111-1111-1111-111111111111')
+    ));
+  perform pg_temp.rec('duplicate_tierlist: no submissions/stats/shares were copied',
+    (select count(*) from public.submissions where tierlist_id = dup_id) = 0
+    and (select count(*) from public.tierlist_item_stats where tierlist_id = dup_id) = 0
+    and (select count(*) from public.shares where tierlist_id = dup_id) = 0);
+  perform pg_temp.rec('duplicate_tierlist: a colliding slug is rejected',
+    pg_temp.run_as('authenticated', admin_id,
+      'select public.duplicate_tierlist(''11111111-1111-1111-1111-111111111111'', ''live-game-copy'')') = '23505');
+
+  -- ---- set_tierlist_items -------------------------------------------------
+  perform pg_temp.rec('set_tierlist_items: non-admin cannot call it',
+    pg_temp.run_as('authenticated', bob_id,
+      format('select public.set_tierlist_items(%L, %L::jsonb)', draft_id,
+        '[{"label":"A","sort_order":0}]')) = '42501');
+
+  perform pg_temp.rec('set_tierlist_items: admin sets the initial item set',
+    pg_temp.run_as('authenticated', admin_id,
+      format('select public.set_tierlist_items(%L, %L::jsonb)', draft_id,
+        '[{"label":"Alpha","sort_order":0},{"label":"Beta","image_url":"https://example.com/b.png","sort_order":1}]'))
+      is null);
+  perform pg_temp.rec('set_tierlist_items: item rows match the payload exactly',
+    (select array_agg(label order by sort_order) from public.tierlist_items where tierlist_id = draft_id)
+      = array['Alpha','Beta']);
+
+  perform pg_temp.rec('set_tierlist_items: a second call fully replaces the item set (old rows gone)',
+    pg_temp.run_as('authenticated', admin_id,
+      format('select public.set_tierlist_items(%L, %L::jsonb)', draft_id,
+        '[{"label":"Gamma","sort_order":0}]')) is null);
+  perform pg_temp.rec('set_tierlist_items: replacement left exactly the new set',
+    (select array_agg(label) from public.tierlist_items where tierlist_id = draft_id) = array['Gamma']);
+
+  perform pg_temp.rec('set_tierlist_items: rejects a duplicate sort_order',
+    pg_temp.run_as('authenticated', admin_id,
+      format('select public.set_tierlist_items(%L, %L::jsonb)', draft_id,
+        '[{"label":"X","sort_order":0},{"label":"Y","sort_order":0}]')) = '22023');
+  perform pg_temp.rec('set_tierlist_items: rejects a non-https image_url',
+    pg_temp.run_as('authenticated', admin_id,
+      format('select public.set_tierlist_items(%L, %L::jsonb)', draft_id,
+        '[{"label":"X","image_url":"http://insecure.example.com/x.png","sort_order":0}]')) = '22023');
+
+  perform pg_temp.rec('set_tierlist_items: blocked once the tierlist has official submissions (23001)',
+    pg_temp.run_as('authenticated', admin_id,
+      format('select public.set_tierlist_items(%L, %L::jsonb)', '44444444-4444-4444-4444-444444444444',
+        '[{"label":"Nope","sort_order":0}]')) = '23001');
+
+  -- ---- narrowed direct table grants -- tested AS the admin's own
+  --      `authenticated` role via run_as/eval_as. This whole do-block
+  --      otherwise runs as the file owner (superuser), which bypasses grants
+  --      entirely, so these three checks specifically must go through
+  --      run_as() rather than a bare statement. --------------------------
+  perform pg_temp.rec('grants: admin cannot set status via a direct table UPDATE (column not granted, 42501)',
+    pg_temp.run_as('authenticated', admin_id,
+      format('update public.tierlists set status = ''live'' where id = %L', draft_id)) = '42501');
+
+  perform pg_temp.run_as('authenticated', admin_id,
+    format('update public.tierlists set title = ''M8 Draft Renamed'' where id = %L', draft_id));
+  perform pg_temp.rec('grants: admin CAN still update title directly (column retained)',
+    (select title = 'M8 Draft Renamed' from public.tierlists where id = draft_id));
+
+  perform pg_temp.rec('grants: direct INSERT into tierlist_items is fully revoked (42501)',
+    pg_temp.run_as('authenticated', admin_id,
+      format('insert into public.tierlist_items (tierlist_id, label, sort_order) values (%L, ''Direct Insert'', 9)',
+        draft_id)) = '42501');
+end;
+$$;
+
+-- =====================================================================
+-- 15. M8 privilege catalog check (same static-ACL rationale as section 10)
+-- =====================================================================
+do $$
+declare v_leak text;
+begin
+  select string_agg(routine_name, ', ' order by routine_name) into v_leak
+  from information_schema.routine_privileges
+  where routine_schema = 'public' and grantee = 'anon'
+    and routine_name in ('schedule_tierlist', 'unschedule_tierlist', 'duplicate_tierlist', 'set_tierlist_items');
+  perform pg_temp.rec('privilege catalog: anon has NO EXECUTE on any M8 admin RPC', v_leak is null,
+    coalesce('anon can execute: ' || v_leak, ''));
+
+  select string_agg(fn, ', ' order by fn) into v_leak
+  from unnest(array['schedule_tierlist', 'unschedule_tierlist', 'duplicate_tierlist', 'set_tierlist_items']) as fn
+  where not exists (
+    select 1 from information_schema.routine_privileges
+    where routine_schema = 'public' and routine_name = fn and grantee = 'authenticated'
+  );
+  perform pg_temp.rec('privilege catalog: authenticated HAS EXECUTE on every M8 admin RPC', v_leak is null,
+    coalesce('missing for: ' || v_leak, ''));
+
+  perform pg_temp.rec('privilege catalog: anon has NO EXECUTE on is_admin_user',
+    not exists (select 1 from information_schema.routine_privileges
+      where routine_schema = 'public' and routine_name = 'is_admin_user' and grantee = 'anon'));
+  perform pg_temp.rec('privilege catalog: authenticated HAS EXECUTE on is_admin_user',
+    exists (select 1 from information_schema.routine_privileges
+      where routine_schema = 'public' and routine_name = 'is_admin_user' and grantee = 'authenticated'));
+
+  perform pg_temp.rec('privilege catalog: anon HAS EXECUTE on get_daily_game (player-facing)',
+    exists (select 1 from information_schema.routine_privileges
+      where routine_schema = 'public' and routine_name = 'get_daily_game' and grantee = 'anon'));
+  perform pg_temp.rec('privilege catalog: authenticated HAS EXECUTE on get_daily_game (player-facing)',
+    exists (select 1 from information_schema.routine_privileges
+      where routine_schema = 'public' and routine_name = 'get_daily_game' and grantee = 'authenticated'));
+
+  perform pg_temp.rec('privilege catalog: private.current_daily_game_id has NO anon/authenticated EXECUTE',
+    not exists (select 1 from information_schema.routine_privileges
+      where routine_schema = 'private' and routine_name = 'current_daily_game_id'
+        and grantee in ('anon', 'authenticated')));
+
+  perform pg_temp.rec('privilege catalog: authenticated has NO table-level INSERT on tierlist_items',
+    not exists (select 1 from information_schema.role_table_grants
+      where table_schema = 'public' and table_name = 'tierlist_items'
+        and grantee = 'authenticated' and privilege_type = 'INSERT'));
+  perform pg_temp.rec('privilege catalog: authenticated has NO table-level UPDATE on tierlist_items',
+    not exists (select 1 from information_schema.role_table_grants
+      where table_schema = 'public' and table_name = 'tierlist_items'
+        and grantee = 'authenticated' and privilege_type = 'UPDATE'));
+  perform pg_temp.rec('privilege catalog: authenticated has NO table-level DELETE on tierlist_items',
+    not exists (select 1 from information_schema.role_table_grants
+      where table_schema = 'public' and table_name = 'tierlist_items'
+        and grantee = 'authenticated' and privilege_type = 'DELETE'));
+  perform pg_temp.rec('privilege catalog: authenticated still has table-level SELECT on tierlist_items',
+    exists (select 1 from information_schema.role_table_grants
+      where table_schema = 'public' and table_name = 'tierlist_items'
+        and grantee = 'authenticated' and privilege_type = 'SELECT'));
+
+  perform pg_temp.rec('privilege catalog: authenticated column-UPDATE on tierlists allows title',
+    exists (select 1 from information_schema.column_privileges
+      where table_schema = 'public' and table_name = 'tierlists'
+        and grantee = 'authenticated' and column_name = 'title' and privilege_type = 'UPDATE'));
+  perform pg_temp.rec('privilege catalog: authenticated column-UPDATE on tierlists does NOT allow status',
+    not exists (select 1 from information_schema.column_privileges
+      where table_schema = 'public' and table_name = 'tierlists'
+        and grantee = 'authenticated' and column_name = 'status' and privilege_type = 'UPDATE'));
+  perform pg_temp.rec('privilege catalog: authenticated column-UPDATE on tierlists does NOT allow release_date',
+    not exists (select 1 from information_schema.column_privileges
+      where table_schema = 'public' and table_name = 'tierlists'
+        and grantee = 'authenticated' and column_name = 'release_date' and privilege_type = 'UPDATE'));
+  perform pg_temp.rec('privilege catalog: authenticated column-UPDATE on tierlists does NOT allow tier_config',
+    not exists (select 1 from information_schema.column_privileges
+      where table_schema = 'public' and table_name = 'tierlists'
+        and grantee = 'authenticated' and column_name = 'tier_config' and privilege_type = 'UPDATE'));
 end;
 $$;
 

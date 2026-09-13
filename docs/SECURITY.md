@@ -103,6 +103,40 @@ There must not be a public admin-registration path.
 
 Document admin bootstrap in `DEPLOY.md`.
 
+**As built (Milestone 8):** `profiles.is_admin` still has no client write path
+at all (unchanged since migration 1). Every admin mutation is one of two
+shapes:
+
+1. A narrow SECURITY DEFINER RPC (`schedule_tierlist`, `unschedule_tierlist`,
+   `duplicate_tierlist`, `set_tierlist_items`) — each independently calls
+   `private.is_admin()` and raises `insufficient_privilege` (42501) for
+   anyone else, *before* doing anything else. Grants:
+   `revoke all ... from public, anon, authenticated; grant execute ... to
+   authenticated;` — `anon` never has EXECUTE at all, `authenticated`'s grant
+   only lets a signed-in caller reach the function, which then independently
+   rejects a non-admin.
+2. A plain RLS-gated table operation (`tierlists` insert/update/delete) for
+   simple draft metadata CRUD — the pre-existing `tierlists_admin_*` RLS
+   policies (migration 4) are unchanged and remain the authority; migration 8
+   additionally narrows `authenticated`'s table/column grants so that even an
+   admin's own client can only touch `title`/`prompt`/`slug` directly —
+   `status`/`release_date`/`tier_config` are reachable *only* through the
+   RPCs above, and `tierlist_items` lost direct client insert/update/delete
+   entirely (all item mutation is `set_tierlist_items`-only now).
+
+`public.is_admin_user()` is a new thin SECURITY DEFINER wrapper around
+`private.is_admin()`, `authenticated`-only (no `anon`), used solely so the
+`/admin` route and Server Actions can gate themselves server-side — it
+reveals nothing beyond the caller's own admin status, mirroring the
+`has_submitted_ranking` wrapper pattern. An authenticated non-admin calling
+any admin RPC directly via PostgREST fails with 42501 before the function
+body runs; verified in `supabase/tests/rls_spec.sql` sections 14-15
+(runtime behavior + static catalog-level grant assertions via
+`information_schema.routine_privileges` / `role_table_grants` /
+`column_privileges`, following the same rationale as the Milestone 7 friend-
+RPC privilege-catalog check: a runtime 42501 only proves the function's own
+internal check works, not that the grant itself is actually narrow).
+
 ---
 
 ## 5. Supabase Service Role
@@ -431,6 +465,19 @@ Do not allow users to submit to:
 Use the canonical application timezone for release checks.
 
 Admins may need preview behavior through separate authorized paths.
+
+**As built (Milestone 8):** `submit_ranking` requires the target tierlist to
+equal `private.current_daily_game_id()` exactly (`is distinct from`, so "no
+current game" correctly rejects every attempt rather than passing a null
+comparison) — not merely "status is scheduled/live and release_date <=
+today," which was the pre-M8 check. That looser check left old superseded
+games submittable forever once real day-to-day scheduling existed (nothing
+transitioned them out of eligibility without a cron this project deliberately
+doesn't have). Admin preview (`/admin/tierlists/[id]`) reads the specific
+tierlist by id through the pre-existing admin RLS bypass on `tierlists`/
+`tierlist_items` — a separate, admin-authenticated path from the player
+resolver, never the resolver itself, and never able to submit (no submission
+call exists on that page).
 
 ---
 

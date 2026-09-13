@@ -1,11 +1,3 @@
-/**
- * Generated Supabase database types. Do not edit by hand.
- *
- * Regenerate after any migration with the Supabase MCP
- * (`generate_typescript_types` for project `zhivsldkpavidxzrgtjl`) or:
- *   supabase gen types typescript --project-id zhivsldkpavidxzrgtjl > lib/supabase/types.ts
- */
-
 export type Json =
   | string
   | number
@@ -13,12 +5,31 @@ export type Json =
   | null
   | { [key: string]: Json | undefined }
   | Json[]
-
 export type Database = {
-  // Allows to automatically instantiate createClient with right options
-  // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
-  __InternalSupabase: {
-    PostgrestVersion: "14.5"
+  graphql_public: {
+    Tables: {
+      [_ in never]: never
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      graphql: {
+        Args: {
+          extensions?: Json
+          operationName?: string
+          query?: string
+          variables?: Json
+        }
+        Returns: Json
+      }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
   }
   public: {
     Tables: {
@@ -439,6 +450,29 @@ export type Database = {
         Args: { p_request_id: string }
         Returns: boolean
       }
+      duplicate_tierlist: {
+        Args: { p_new_slug: string; p_source_id: string }
+        Returns: {
+          created_at: string
+          created_by: string | null
+          id: string
+          prompt: string | null
+          published_at: string | null
+          release_date: string | null
+          slug: string
+          status: string
+          tier_config: Json
+          title: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "tierlists"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      get_daily_game: { Args: never; Returns: Json }
       get_friend_played_status: {
         Args: { p_tierlist_id: string }
         Returns: Json
@@ -456,13 +490,75 @@ export type Database = {
         Args: { p_guest_id?: string; p_tierlist_id: string }
         Returns: boolean
       }
+      is_admin_user: { Args: never; Returns: boolean }
       list_friend_requests: { Args: never; Returns: Json }
       remove_friend: { Args: { p_user_id: string }; Returns: boolean }
+      schedule_tierlist: {
+        Args: { p_release_date: string; p_tierlist_id: string }
+        Returns: {
+          created_at: string
+          created_by: string | null
+          id: string
+          prompt: string | null
+          published_at: string | null
+          release_date: string | null
+          slug: string
+          status: string
+          tier_config: Json
+          title: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "tierlists"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       search_profiles: { Args: { p_query: string }; Returns: Json }
       send_friend_request: { Args: { p_recipient_id: string }; Returns: Json }
+      set_tierlist_items: {
+        Args: { p_items: Json; p_tierlist_id: string }
+        Returns: {
+          created_at: string
+          id: string
+          image_url: string | null
+          label: string
+          sort_order: number
+          tierlist_id: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "tierlist_items"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       submit_ranking: {
         Args: { p_guest_id?: string; p_items: Json; p_tierlist_id: string }
         Returns: string
+      }
+      unschedule_tierlist: {
+        Args: { p_tierlist_id: string }
+        Returns: {
+          created_at: string
+          created_by: string | null
+          id: string
+          prompt: string | null
+          published_at: string | null
+          release_date: string | null
+          slug: string
+          status: string
+          tier_config: Json
+          title: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "tierlists"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
     }
     Enums: {
@@ -473,11 +569,8 @@ export type Database = {
     }
   }
 }
-
 type DatabaseWithoutInternals = Omit<Database, "__InternalSupabase">
-
 type DefaultSchema = DatabaseWithoutInternals[Extract<keyof Database, "public">]
-
 export type Tables<
   DefaultSchemaTableNameOrOptions extends
     | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
@@ -506,7 +599,6 @@ export type Tables<
       ? R
       : never
     : never
-
 export type TablesInsert<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
@@ -531,7 +623,6 @@ export type TablesInsert<
       ? I
       : never
     : never
-
 export type TablesUpdate<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
@@ -556,7 +647,6 @@ export type TablesUpdate<
       ? U
       : never
     : never
-
 export type Enums<
   DefaultSchemaEnumNameOrOptions extends
     | keyof DefaultSchema["Enums"]
@@ -573,7 +663,6 @@ export type Enums<
   : DefaultSchemaEnumNameOrOptions extends keyof DefaultSchema["Enums"]
     ? DefaultSchema["Enums"][DefaultSchemaEnumNameOrOptions]
     : never
-
 export type CompositeTypes<
   PublicCompositeTypeNameOrOptions extends
     | keyof DefaultSchema["CompositeTypes"]
@@ -590,8 +679,10 @@ export type CompositeTypes<
   : PublicCompositeTypeNameOrOptions extends keyof DefaultSchema["CompositeTypes"]
     ? DefaultSchema["CompositeTypes"][PublicCompositeTypeNameOrOptions]
     : never
-
 export const Constants = {
+  graphql_public: {
+    Enums: {},
+  },
   public: {
     Enums: {},
   },

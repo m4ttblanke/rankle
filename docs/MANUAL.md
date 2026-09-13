@@ -122,6 +122,31 @@ Suggested statuses:
 
 A scheduled game should become eligible automatically when its configured date becomes current in the canonical timezone.
 
+**As built (Milestone 8):** `private.current_daily_game_id()` is the single
+authoritative resolver — the `scheduled`/`live` tierlist with the greatest
+`release_date <= private.today()`. It is caller-independent (SECURITY
+DEFINER, reads the base table directly, ignores RLS) so admin, a non-admin
+authenticated user, and an anonymous visitor always resolve the identical
+game — this replaced a pre-M8 gap where an admin's own RLS bypass could
+(once scheduling existed) make the homepage's raw query resolve a different,
+future game than everyone else. `public.get_daily_game()` is the player-facing
+reader built on it; `getDailyGame()` (`lib/game/get-daily-game.ts`) calls that
+RPC rather than querying `tierlists` directly. `submit_ranking` requires the
+submitted game to equal this same resolver's result — not merely "released
+and not archived" — so a superseded game stops accepting new submissions the
+moment a newer one is released, with no cron/status-transition needed. This
+deliberately preserves the pre-M8 behavior that the most recently released
+game remains current through any scheduling gap (never `release_date ===
+today`) — see `docs/SECURITY.md` sec 4/13 and
+`supabase/migrations/20260912220000_admin_scheduling.sql`.
+
+`live` is accepted by the resolver for backward compatibility with the
+existing status values, but M8's admin tooling never writes it — "is this
+game live today" is a derived comparison against
+`current_daily_game_id()`, not a persisted state. `archived`/`disabled`
+remain supported by the schema but have no admin-exposed workflow in M8 (see
+sec 27).
+
 ---
 
 ## 5. Ranking
@@ -761,6 +786,39 @@ Basic admin capabilities:
 
 Admin UX should prioritize speed and clarity over visual theatrics.
 
+**As built (Milestone 8):** `/admin` (dashboard), `/admin/tierlists/new`
+(create), `/admin/tierlists/[id]` (editor) — no separate calendar route (sec
+28). Authorization is `requireAdmin()` (`lib/admin/require-admin.ts`), which
+calls `public.is_admin_user()`, a thin RPC wrapping `private.is_admin()` —
+added because `profiles.is_admin` has no client SELECT grant at all, so the
+app cannot otherwise learn "am I an admin" to gate the route. Every
+mutation independently re-verifies admin authority server-side regardless
+of this check (`docs/SECURITY.md` sec 4).
+
+Capabilities: create a draft (title/prompt/slug; always the canonical
+S/A/B/C/F/N/A scale — no tier-config UI), edit draft/scheduled metadata,
+manage items (add/remove/rename/reorder via ▲/▼ — no drag, matching the
+player board's own non-drag alternative), preview (reuses the real
+`RankableCard`/`tierStyle` components, admin-authenticated, creates nothing),
+schedule/reschedule/unschedule, duplicate (any source status, always lands as
+a fresh draft with new ids, never copies release date/status/submissions/
+stats/shares), and delete (zero-submission drafts only).
+
+**Historical immutability:** once a tierlist has ANY official submission, the
+database freezes it completely — title/prompt/slug/release_date/tier_config/
+deletion on `tierlists`, and insert/update/delete on its `tierlist_items`, all
+rejected unconditionally (`restrict_violation`, 23001) by two triggers
+(`private.tg_block_tierlist_edit_if_submitted`,
+`private.tg_block_item_edit_if_submitted`). The editor UI reflects this by
+hiding the edit/schedule/delete controls rather than rendering forms that
+would only ever fail; duplicate remains available regardless (it never
+touches the source). No admin action can partially edit a locked game through
+a UI gap — the trigger is unconditional at the database level.
+
+**Image uploads deferred:** `image_url` is a plain optional `https://` URL
+text field (server-validated), no Supabase Storage bucket, no upload UI. See
+`docs/DEPLOY.md`.
+
 ---
 
 ## 28. Admin Calendar
@@ -774,6 +832,14 @@ The admin calendar should quickly answer:
 - Which games are still drafts?
 
 Do not build a heavyweight editorial CMS.
+
+**As built (Milestone 8):** no separate calendar route — `/admin` itself
+shows Today / Upcoming / Drafts / Past as chronological lists (a compact list
+reads better than a month grid at this scale, per sec 28's own guidance).
+"Live today" is computed by comparing each row's id against
+`get_daily_game()`'s own id, so this page can never disagree with what a
+player actually sees. An empty "Upcoming" list is itself the gap signal —
+nothing is scheduled next, so the current game keeps running with no cron.
 
 ---
 

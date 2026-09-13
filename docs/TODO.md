@@ -99,19 +99,24 @@ Periodically clean up old completed items.
 
 ## Admin
 
-- [ ] Add admin role model
-- [ ] Document secure admin bootstrap
-- [ ] Build `/admin`
-- [ ] Create tier-list editor
-- [ ] Add item reorder controls
-- [ ] Add image upload
-- [ ] Add preview
-- [ ] Add scheduling
-- [ ] Add release-date conflict protection
-- [ ] Add admin calendar
-- [ ] Add topic backlog
-- [ ] Add duplicate-game action
-- [ ] Add emergency disable/unpublish action
+- [x] Add admin role model (Milestone 8 — reused `profiles.is_admin` + `private.is_admin()`, unchanged; added `public.is_admin_user()` wrapper)
+- [x] Document secure admin bootstrap (Milestone 8 — unchanged procedure, `docs/DEPLOY.md` sec 16, now with a self-check via `is_admin_user()`)
+- [x] Build `/admin` (Milestone 8)
+- [x] Create tier-list editor (Milestone 8 — `/admin/tierlists/[id]`)
+- [x] Add item reorder controls (Milestone 8 — ▲/▼, no drag)
+- [ ] Add image upload (Milestone 8 explicitly deferred — `image_url` is a pasted `https://` URL only; no Storage bucket. See `docs/DEPLOY.md` sec 11.)
+- [x] Add preview (Milestone 8 — reuses `RankableCard`/`tierStyle`, admin-authenticated, read-only)
+- [x] Add scheduling (Milestone 8 — `schedule_tierlist`/`unschedule_tierlist` RPCs)
+- [x] Add release-date conflict protection (Milestone 8 — reused the pre-existing `tierlists_release_date_key` unique index; no new constraint needed)
+- [x] Add admin calendar (Milestone 8 — a chronological Today/Upcoming/Drafts/Past list on `/admin` itself, no separate calendar route/grid)
+- [ ] Add topic backlog (out of scope for Milestone 8 — see CLAUDE.md's M8 scope note)
+- [x] Add duplicate-game action (Milestone 8 — `duplicate_tierlist` RPC)
+- [x] Add emergency disable/unpublish action (Milestone 8 — `unschedule_tierlist`, future-scheduled-only, returns to draft; no separate "disable" verb was added — see the Milestone 8 write-up under Completed for why)
+- [ ] Once the Milestone 8 migration is applied to the remote project, update
+  `lib/game/get-daily-game.integration.test.ts` to also (or instead) call the
+  new `get_daily_game()` RPC — it currently only smoke-tests the raw
+  `tierlists` query the resolver used *before* M8, which the remote project
+  still runs until that migration ships there.
 
 ## Accounts
 
@@ -220,6 +225,18 @@ Periodically clean up old completed items.
 - [ ] Add automated critical-flow smoke tests
 - [ ] Add usage/cost review procedure
 - [ ] Document significant incident template
+- [ ] Fix pre-existing Vitest integration-test flakiness: several
+  `*.integration.test.ts` files (submit-ranking, get-results, get-share,
+  claim-guest-submissions, friends) all submit rankings to the same seeded
+  local "live" game and run as separate parallel files/workers by default,
+  so `total_submissions`/aggregate-count assertions can race against each
+  other (surfaced during Milestone 8 while adding
+  `lib/admin/admin-rpcs.integration.test.ts`; confirmed pre-existing and
+  unrelated to M8's own changes — `npx vitest run --no-file-parallelism`
+  passes 400/400 deterministically, the default parallel run does not).
+  Fix by disabling file parallelism for `*.integration.test.ts` specifically
+  in `vitest.config.mts`, or by giving each integration file its own
+  dedicated fixture tierlist instead of sharing the seeded one.
 
 ## Security (deferred beyond the initial schema/RLS migration)
 
@@ -684,3 +701,111 @@ Follow-ups it surfaced:
 - [ ] `IncomingRequestRow`/`OutgoingRequestRow`/`FriendRow` don't move focus
   anywhere after an accept/decline/cancel/remove completes — same deferred
   class of heading/focus-management issue noted in M4-M6.
+
+## Milestone 8 — admin & scheduling (2026-09-13, local only, not yet applied remotely)
+
+One migration
+(`supabase/migrations/20260912220000_admin_scheduling.sql`) adds:
+`private.current_daily_game_id()` (the single authoritative "what game is
+current" resolver — caller-independent, used by both `public.get_daily_game()`
+and a tightened `submit_ranking`), `public.get_daily_game()`,
+`public.is_admin_user()`, two historical-lock triggers
+(`tierlists`/`tierlist_items`, unconditional once any submission exists —
+blocking UPDATE *and* DELETE, closing a pre-M8 gap where a submitted
+tierlist could still be deleted and cascade its real submissions away), two
+new lifecycle CHECK constraints (`draft` ⇒ `release_date IS NULL`;
+`scheduled`/`live`/`archived` ⇒ `release_date IS NOT NULL`), and four admin
+RPCs (`schedule_tierlist`, `unschedule_tierlist`, `duplicate_tierlist`,
+`set_tierlist_items`).
+
+**The core correctness fix:** pre-M8, `getDailyGame()` ran a raw `tierlists`
+query trusting RLS to filter by release date — but the admin RLS policy
+intentionally bypasses that filter for `is_admin()`, so an admin's own
+homepage visit could (once real scheduling existed) resolve a *different*,
+future game than every other visitor. Separately, `submit_ranking` only
+checked "released, not archived," so a superseded game with an older release
+date stayed submittable through the raw RPC forever, with nothing to age it
+out (no cron by design). Both are fixed by the one new resolver:
+`get_daily_game()` replaces the raw query in `lib/game/get-daily-game.ts`,
+and `submit_ranking` now requires `p_tierlist_id is distinct from
+current_daily_game_id()` to be false — i.e. the submission must target
+*the* current game, not merely *a* released one. This deliberately preserves
+the pre-M8 behavior that the most recently released game remains current
+through any scheduling gap (never `release_date = today`). Verified with a
+dynamic day-rollover fixture in `supabase/tests/rls_spec.sql` (insert day A,
+prove it's current and submittable, insert day B, prove B is now current and
+A no longer accepts a submission, prove admin/non-admin/anon all agree) and a
+real end-to-end JS-client version in
+`lib/admin/admin-rpcs.integration.test.ts`.
+
+**Historical lock:** once a tierlist has any official submission, the two
+triggers make every mutation on it and its items fail with
+`restrict_violation` (23001) — including deletion, which previously cascaded
+freely. `docs/SECURITY.md`/`docs/MANUAL.md` sec 4/27 have the exact rule.
+
+**Admin surface:** `/admin` (Today/Upcoming/Drafts/Past, no calendar grid),
+`/admin/tierlists/new`, `/admin/tierlists/[id]` (metadata form, ▲/▼ item
+editor, schedule control, a preview reusing the real `RankableCard`/
+`tierStyle` player components, duplicate, delete). `requireAdmin()` /
+`isCurrentUserAdmin()` (`lib/admin/require-admin.ts`) gate every route and
+Server Action via the new `is_admin_user()` RPC. Tier configuration is
+hard-coded to the canonical S/A/B/C/F/N/A scale server-side for new games —
+no custom tier-config UI. Image support stays a pasted `https://` URL, no
+Storage bucket (tracked above).
+
+**Grants tightened, not just added:** following the M6/M7 "remote default
+ACL" lesson, every new function explicitly revokes from `public, anon,
+authenticated` before granting only the intended role, written correctly the
+first time rather than needing a follow-up hardening migration. `tierlists`'
+client grants narrowed to column-level (`title`/`prompt`/`slug` only —
+`status`/`release_date`/`tier_config` are RPC-only); `tierlist_items` lost
+direct client table access entirely (item mutation is `set_tierlist_items`-
+only now). A static catalog-level privilege check
+(`information_schema.routine_privileges`/`role_table_grants`/
+`column_privileges`) verifies this directly, mirroring the Milestone 7
+friend-RPC privilege-catalog test's own rationale.
+
+**Existing test semantics that had to change (not a regression, a
+consequence of the tightened `submit_ranking`):** `supabase/tests/rls_spec.sql`'s
+`na-game`/`teardown-game` fixtures are deliberately dated before `live-game`,
+so several sections that used to call the real `submit_ranking` RPC against
+them (N/A-exclusion tests, claim-mechanics setup) now use a new
+`pg_temp.fixture_submit()` helper that performs the identical insert +
+aggregate-update logic *without* the current-game gate — these were always
+fixture setup for other features, not tests of submission eligibility itself,
+and every downstream assertion's expected values are unchanged because the
+helper mirrors `submit_ranking`'s math exactly. The "game teardown still
+cascades (UPDATE-only trigger, not DELETE)" test was intentionally flipped to
+assert the opposite — deletion is now blocked — since that was precisely the
+gap Decision 3 closed.
+
+261 SQL/RLS assertions (up from 190; all M1-M7 assertions unchanged in
+expected outcome), 400 Vitest (72 new: `lib/admin/schema.test.ts`,
+`lib/admin/require-admin.test.ts`, seven Server Action test files, a real-
+admin-session `lib/admin/admin-rpcs.integration.test.ts`), 77 Playwright (5
+new `e2e/admin.spec.ts`: non-admin/anon redirected, full create → items →
+schedule → duplicate-date-rejected → unschedule → edit → reschedule
+lifecycle, duplicate copies items into a fresh unscheduled draft, historical
+lock reflected in the editor UI) — all green on a clean `supabase db reset`
+replay. Lint, typecheck, and a production build are all clean;
+`/admin`, `/admin/tierlists/new`, `/admin/tierlists/[id]` all render `ƒ`
+(server-rendered on demand), same as every other account-sensitive route.
+
+Not yet applied to the remote Supabase project — approved to implement and
+test locally only; remote deployment is a separate, explicitly-approved
+follow-up step.
+
+Follow-ups it surfaced (also tracked above, under Admin/Operations):
+
+- [ ] Pre-existing Vitest integration-test flakiness across `lib/game/*.integration.test.ts`
+  (shared seeded "live" game, parallel file workers) — confirmed unrelated to
+  M8, tracked under Operations above.
+- [ ] `lib/game/get-daily-game.integration.test.ts` still smoke-tests the
+  pre-M8 raw query against the remote project (which hasn't received this
+  migration yet) — tracked under Admin above.
+- [ ] No explicit "archive" admin action was built — a superseded game
+  naturally stops being current the moment a newer one releases, and the
+  historical lock already makes further editing impossible once it has
+  submissions, so `archived`/`disabled` remain legacy/reserved schema values
+  with no M8 UI verb. Revisit only if a real product need for manually
+  marking/organizing very old content emerges.

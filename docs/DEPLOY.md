@@ -262,6 +262,14 @@ Validate upload permissions through storage policies.
 
 If public media volume later justifies another object store, document migration before changing providers.
 
+**As built (Milestone 8):** no Storage bucket exists yet. `tierlist_items.image_url`
+is a plain optional `https://` URL an admin pastes in
+(`/admin/tierlists/[id]`), server-validated (`lib/admin/schema.ts`), with no
+upload UI, no service-role media handling, and no image processing —
+deliberately deferred per `docs/CLAUDE.md`'s cost/simplicity guidance rather
+than inventing upload/MIME/size security surface for a nice-to-have. Real
+Storage-backed uploads remain tracked in `docs/TODO.md`.
+
 ---
 
 ## 12. Vercel Project
@@ -353,7 +361,10 @@ set; see `supabase/README.md` "Admin bootstrap"):
    ```
 
 3. Verify: `private.is_admin()` returns true for that user; admin-only RLS
-   policies on `tierlists` / `tierlist_items` now allow writes.
+   policies on `tierlists` / `tierlist_items` now allow writes. As of
+   Milestone 8, the person can also confirm this themselves by visiting
+   `/admin` while signed in, or by calling `select public.is_admin_user()` as
+   that user (the same RPC the app uses to gate the route).
 
 `profiles.is_admin` has **no** client column-update grant (migration 4), so it
 cannot be set through the API — only from a role that bypasses RLS.

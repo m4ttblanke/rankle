@@ -4,12 +4,16 @@ import type { Database } from "@/lib/supabase/types";
 import { DAILY_GAME_SELECT, DAILY_GAME_STATUSES, mapDailyGame } from "./schema";
 
 /*
- * Read-only integration check for the daily-game query against the remote
- * project, from the app's publishable key. Runs the exact select/filter chain
- * the resolver uses (getDailyGame() itself can't run here — it needs Next's
- * request context for cookies()). Verifies column names, the embedded-resource
- * name, and the filter operators are all valid, and that RLS/grants let the
- * anon role run it.
+ * Read-only integration check against the remote project, from the app's
+ * publishable key.
+ *
+ * Milestone 8: getDailyGame() itself now calls the get_daily_game() RPC, not
+ * this raw table query (see docs/SECURITY.md sec 13 for why: RLS's admin
+ * bypass on tierlists made the raw query caller-dependent). This file still
+ * exercises the raw query/columns/RLS grant directly as a narrow smoke test
+ * of the base table shape against the remote project, which has not yet
+ * received the M8 migration — TODO once M8 ships remotely: add a companion
+ * case that calls the get_daily_game() RPC instead/in addition.
  *
  * The remote DB has no games, so the expected result today is `null`. When an
  * isolated test database with fixtures exists, add cases for: ignores future
