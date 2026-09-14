@@ -446,7 +446,24 @@ Do not rely on deployment server timezone.
 
 ## 21. Analytics
 
-If PostHog or another analytics provider is enabled:
+**As built (Milestone 10):** Vercel Web Analytics is enabled — basic
+site-traffic/page-view analytics only, via `@vercel/analytics`
+(`<Analytics />` rendered once in `app/layout.tsx`'s root `<body>`, using
+the official `@vercel/analytics/next` App Router integration). No
+environment variables or configuration are required; it activates
+automatically once deployed to Vercel and reports through the Vercel
+dashboard's Analytics tab. It does not run in local development in any way
+that sends data (Vercel's script only reports when actually served from a
+Vercel deployment).
+
+This is deliberately basic traffic analytics, not a product-analytics
+system — it collects only anonymous page views/navigation, nothing
+Rankle-specific (no user IDs, emails, ranking contents, friend data, or
+share tokens are ever passed to it; the component takes no such props).
+Product-level metrics (daily players, completion rate, share conversion,
+etc.) are tracked as a separate future item — see `docs/TODO.md`.
+
+If PostHog or another product-analytics provider is enabled later:
 
 - Configure client key appropriately
 - Do not expose private server secrets

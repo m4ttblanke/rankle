@@ -1,3 +1,4 @@
+import { Analytics } from "@vercel/analytics/next";
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { Bricolage_Grotesque, Hanken_Grotesk } from "next/font/google";
@@ -40,7 +41,10 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       lang="en"
       className={`${bricolage.variable} ${hanken.variable} h-full antialiased`}
     >
-      <body className="flex min-h-full flex-col">{children}</body>
+      <body className="flex min-h-full flex-col">
+        {children}
+        <Analytics />
+      </body>
     </html>
   );
 }

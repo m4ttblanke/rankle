@@ -154,14 +154,21 @@ Periodically clean up old completed items.
 
 ## Product Analytics
 
-- [ ] Choose analytics provider
-- [ ] Track daily play starts
-- [ ] Track successful submissions
-- [ ] Track shares
-- [ ] Track share visits
-- [ ] Track share-to-play conversion
-- [ ] Track account creation
-- [ ] Avoid sending unnecessary PII
+Separate from Vercel Web Analytics (Milestone 10 — basic anonymous
+traffic/page-view analytics only, `docs/DEPLOY.md` sec 21). Product
+analytics means Rankle-specific behavioral metrics, which need their own
+provider decision (e.g. PostHog) and are explicitly not implemented yet:
+
+- [ ] Choose product-analytics provider
+- [ ] Daily players
+- [ ] Ranking completion rate
+- [ ] Submission rate
+- [ ] Share creation
+- [ ] Share → play conversion
+- [ ] New vs. returning players
+- [ ] Account conversion (guest → registered)
+- [ ] Average completion time
+- [ ] Avoid sending unnecessary PII (`docs/SECURITY.md` sec 23)
 
 ---
 

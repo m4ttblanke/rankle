@@ -67,6 +67,11 @@ Use Vercel status/logs for:
 - Function errors
 - Runtime behavior
 
+**As built (Milestone 10):** Vercel Web Analytics is enabled (basic
+traffic/page-view analytics, `docs/DEPLOY.md` sec 21) — use the Vercel
+dashboard's Analytics tab for visitor/page-view trends. This is not error
+monitoring and does not replace Vercel's function/runtime logs above.
+
 ### Database
 
 Use Supabase tooling for:
