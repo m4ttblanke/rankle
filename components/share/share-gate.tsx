@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { FocusHeading } from "@/components/layout/focus-heading";
 import type { ShareTeaser } from "@/lib/game/share-schema";
 
 /**
@@ -29,9 +30,9 @@ export function ShareGate({
       <span className="text-xs font-semibold uppercase tracking-wide text-muted">
         Rankle
       </span>
-      <h1 className="font-display text-3xl font-extrabold leading-tight tracking-tight text-foreground sm:text-4xl">
+      <FocusHeading className="font-display text-3xl font-extrabold leading-tight tracking-tight text-foreground sm:text-4xl">
         {intro}
-      </h1>
+      </FocusHeading>
       {share.tierlistPrompt ? (
         <p className="max-w-sm text-sm text-muted">{share.tierlistPrompt}</p>
       ) : null}

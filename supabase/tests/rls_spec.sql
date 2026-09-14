@@ -1774,6 +1774,76 @@ end;
 $$;
 
 -- =====================================================================
+-- 16. get_next_release_date(): Milestone 9 countdown support
+--
+-- Exposes ONLY the bare date of the next FUTURE 'scheduled' release, never
+-- which game it is. Deliberately the LAST mutating section: its final
+-- sub-test deletes the shared 'future-game' fixture (release_date =
+-- today()+30, inserted in the main fixture block above) to prove the
+-- "nothing scheduled" -> NULL case, which nothing after this point in the
+-- file depends on.
+-- =====================================================================
+do $$
+declare
+  v_closer   uuid := '0b000000-0000-0000-0000-0000000000c1';
+  v_disabled uuid := '0b000000-0000-0000-0000-0000000000c2';
+begin
+  -- baseline: only the shared 'future-game' fixture (today()+30) is
+  -- scheduled and future -- it wins by default.
+  perform pg_temp.rec('get_next_release_date: baseline resolves the existing future-game (+30)',
+    (pg_temp.eval_as('anon', null, 'select to_jsonb(public.get_next_release_date())') #>> '{}')
+      = to_char(private.today() + 30, 'YYYY-MM-DD'));
+
+  insert into public.tierlists (id, slug, title, status, release_date, tier_config)
+  values (v_closer, 'm9-closer-game', 'M9 Closer Game', 'scheduled', private.today() + 5,
+    '["S","A","B","C","F","N/A"]'::jsonb);
+
+  perform pg_temp.rec('get_next_release_date: a closer scheduled date wins over a farther one (MIN, not any)',
+    (pg_temp.eval_as('anon', null, 'select to_jsonb(public.get_next_release_date())') #>> '{}')
+      = to_char(private.today() + 5, 'YYYY-MM-DD'));
+
+  insert into public.tierlists (id, slug, title, status, release_date, tier_config)
+  values (v_disabled, 'm9-disabled-game', 'M9 Disabled Game', 'disabled', private.today() + 2,
+    '["S","A","B","C","F","N/A"]'::jsonb);
+
+  perform pg_temp.rec('get_next_release_date: a non-''scheduled'' status is ignored even with a closer date',
+    (pg_temp.eval_as('anon', null, 'select to_jsonb(public.get_next_release_date())') #>> '{}')
+      = to_char(private.today() + 5, 'YYYY-MM-DD'));
+
+  perform pg_temp.rec('get_next_release_date: today''s live-game (release_date = today, not future) never wins',
+    (pg_temp.eval_as('anon', null, 'select to_jsonb(public.get_next_release_date())') #>> '{}')
+      <> to_char(private.today(), 'YYYY-MM-DD'));
+
+  delete from public.tierlists where id in (v_closer, v_disabled, '22222222-2222-2222-2222-222222222222');
+
+  -- to_jsonb(NULL::date) is SQL NULL, not the jsonb 'null' literal -- eval_as
+  -- returns that NULL straight through, so the assertion checks IS NULL, not
+  -- equality with 'null'::jsonb (which itself evaluates to NULL, never TRUE).
+  perform pg_temp.rec('get_next_release_date: NULL when nothing is scheduled in the future',
+    (pg_temp.eval_as('anon', null, 'select to_jsonb(public.get_next_release_date())')) is null);
+
+  perform pg_temp.rec('get_next_release_date: authenticated non-admin (bob) sees the SAME result as anon',
+    (pg_temp.eval_as('authenticated', 'bbbbbbbb-0000-0000-0000-000000000002',
+      'select to_jsonb(public.get_next_release_date())')) is null);
+
+  perform pg_temp.rec('get_next_release_date: admin (alice) sees the SAME result too (caller-independent)',
+    (pg_temp.eval_as('authenticated', 'aaaaaaaa-0000-0000-0000-000000000001',
+      'select to_jsonb(public.get_next_release_date())')) is null);
+end;
+$$;
+
+do $$
+begin
+  perform pg_temp.rec('privilege catalog: anon HAS EXECUTE on get_next_release_date',
+    exists (select 1 from information_schema.routine_privileges
+      where routine_schema = 'public' and routine_name = 'get_next_release_date' and grantee = 'anon'));
+  perform pg_temp.rec('privilege catalog: authenticated HAS EXECUTE on get_next_release_date',
+    exists (select 1 from information_schema.routine_privileges
+      where routine_schema = 'public' and routine_name = 'get_next_release_date' and grantee = 'authenticated'));
+end;
+$$;
+
+-- =====================================================================
 -- results
 -- =====================================================================
 select id, status, name, detail from _t order by id;

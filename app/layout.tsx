@@ -22,6 +22,16 @@ const hanken = Hanken_Grotesk({
 export const metadata: Metadata = {
   title: "Rankle",
   description: "A daily social tier-list game. Rank today's list.",
+  applicationName: "Rankle",
+  icons: {
+    icon: [
+      { url: "/brand/rankle-mark.svg", type: "image/svg+xml" },
+      { url: "/brand/rankle-icon.png", type: "image/png", sizes: "512x512" },
+    ],
+    apple: [
+      { url: "/brand/rankle-apple-icon.png", type: "image/png", sizes: "180x180" },
+    ],
+  },
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

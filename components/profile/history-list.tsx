@@ -1,18 +1,7 @@
 import Link from "next/link";
 import { tierStyle } from "@/components/game/tier-style";
+import { formatDateOnly } from "@/lib/game/format-date";
 import type { HistoryEntry } from "@/lib/game/history-schema";
-
-/** `releaseDate` is a DATE-only column (e.g. "2026-09-12"), which `new
- *  Date(...)` parses as UTC midnight — formatting that directly in a
- *  timezone behind UTC would show the previous day. Parsing as local
- *  midnight instead (no trailing "Z") avoids that shift. */
-function formatDate(dateOnly: string) {
-  return new Date(`${dateOnly}T00:00:00`).toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
-}
 
 /**
  * The current user's history list (Milestone 6) — immutable official
@@ -42,7 +31,7 @@ export function HistoryList({ entries }: { entries: HistoryEntry[] }) {
                 {entry.tierlistTitle}
               </span>
               <span className="text-xs text-muted">
-                {entry.releaseDate ? formatDate(entry.releaseDate) : "—"}
+                {entry.releaseDate ? formatDateOnly(entry.releaseDate) : "—"}
               </span>
             </div>
             <div className="flex shrink-0 gap-1">

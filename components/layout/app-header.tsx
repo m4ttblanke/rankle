@@ -16,41 +16,60 @@ export async function AppHeader() {
     <header className="mx-auto flex w-full max-w-2xl items-baseline justify-between gap-3 px-4 pt-5 sm:px-6 sm:pt-8">
       <Link
         href="/"
-        className="font-display text-lg font-extrabold tracking-tight text-foreground outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        className="flex items-center gap-1.5 font-display text-lg font-extrabold tracking-tight text-foreground outline-none focus-visible:ring-2 focus-visible:ring-accent"
       >
+        {/* eslint-disable-next-line @next/next/no-img-element -- static local
+            SVG mark; next/image's optimizer refuses local SVGs without
+            widening next.config.ts's dangerouslyAllowSVG allowance repo-wide. */}
+        <img
+          src="/brand/rankle-mark.svg"
+          alt=""
+          aria-hidden="true"
+          width={22}
+          height={22}
+          className="shrink-0"
+        />
         Rankle
       </Link>
-      {profile ? (
-        <nav className="flex items-center gap-3 text-xs">
-          <Link
-            href="/friends"
-            className="font-semibold text-foreground underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-accent"
-          >
-            Friends
-          </Link>
-          <Link
-            href="/profile"
-            className="font-semibold text-foreground underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-accent"
-          >
-            {profile.displayName}
-          </Link>
-          <form action={signOut}>
-            <button
-              type="submit"
-              className="text-muted underline-offset-2 outline-none hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-accent"
-            >
-              Sign out
-            </button>
-          </form>
-        </nav>
-      ) : (
+      <nav className="flex items-center gap-3 text-xs">
         <Link
-          href="/login"
-          className="text-xs font-semibold text-foreground underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-accent"
+          href="/archive"
+          className="font-semibold text-foreground underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-accent"
         >
-          Sign in
+          Archive
         </Link>
-      )}
+        {profile ? (
+          <>
+            <Link
+              href="/friends"
+              className="font-semibold text-foreground underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-accent"
+            >
+              Friends
+            </Link>
+            <Link
+              href="/profile"
+              className="font-semibold text-foreground underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-accent"
+            >
+              {profile.displayName}
+            </Link>
+            <form action={signOut}>
+              <button
+                type="submit"
+                className="text-muted underline-offset-2 outline-none hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-accent"
+              >
+                Sign out
+              </button>
+            </form>
+          </>
+        ) : (
+          <Link
+            href="/login"
+            className="font-semibold text-foreground underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-accent"
+          >
+            Sign in
+          </Link>
+        )}
+      </nav>
     </header>
   );
 }

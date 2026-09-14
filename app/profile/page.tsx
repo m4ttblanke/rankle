@@ -2,9 +2,12 @@ import { redirect } from "next/navigation";
 import { AvatarPlaceholder } from "@/components/profile/avatar";
 import { HistoryList } from "@/components/profile/history-list";
 import { ProfileEditForm } from "@/components/profile/profile-edit-form";
+import { StreakStats } from "@/components/profile/streak-stats";
 import { AppHeader } from "@/components/layout/app-header";
+import { FocusHeading } from "@/components/layout/focus-heading";
 import { getCurrentProfile } from "@/lib/auth/current-user";
 import { getMyHistory } from "@/lib/game/history";
+import { getMyStreaks } from "@/lib/game/get-streaks";
 
 function formatJoined(iso: string) {
   return new Date(iso).toLocaleDateString(undefined, {
@@ -28,7 +31,7 @@ export default async function ProfilePage() {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
 
-  const history = await getMyHistory();
+  const [history, streak] = await Promise.all([getMyHistory(), getMyStreaks()]);
 
   return (
     <>
@@ -37,9 +40,9 @@ export default async function ProfilePage() {
         <header className="flex items-center gap-4">
           <AvatarPlaceholder name={profile.displayName} />
           <div className="flex flex-col gap-0.5">
-            <h1 className="font-display text-2xl font-extrabold tracking-tight text-foreground sm:text-3xl">
+            <FocusHeading className="font-display text-2xl font-extrabold tracking-tight text-foreground sm:text-3xl">
               {profile.displayName}
-            </h1>
+            </FocusHeading>
             <p className="text-sm text-muted">
               @{profile.username} · Joined {formatJoined(profile.createdAt)}
             </p>
@@ -52,6 +55,15 @@ export default async function ProfilePage() {
           </h2>
           <ProfileEditForm username={profile.username} displayName={profile.displayName} />
         </section>
+
+        {streak ? (
+          <section aria-labelledby="streak-heading" className="flex flex-col gap-3">
+            <h2 id="streak-heading" className="font-display text-xl font-extrabold text-foreground">
+              Streak
+            </h2>
+            <StreakStats streak={streak} />
+          </section>
+        ) : null}
 
         <section aria-labelledby="history-heading" className="flex flex-col gap-3">
           <h2 id="history-heading" className="font-display text-xl font-extrabold text-foreground">

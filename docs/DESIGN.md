@@ -58,6 +58,43 @@ Spend visual boldness here.
 
 Keep surrounding UI more restrained.
 
+### Brand Mark (Milestone 9)
+
+Canonical symbol: three overlapping flat rounded cards, fanned diagonally —
+red/pink card frontmost (top), yellow/orange card in the middle, blue card
+backmost (bottom), each with a thin black outline. Playful asymmetry (uneven
+rotation/offset), no gradients, no shadows, no mascot, no letters inside the
+mark. This is the first formalized Rankle brand asset (previously undecided —
+see sec 35).
+
+- Source of truth: `public/brand/rankle-mark.svg` (100x100 viewBox, transparent
+  background, hand-authored vector — no embedded raster data).
+- Colors: red/pink `#FF4D6D`, yellow/orange `#FFB020`, blue `#3A6FF0`, outline
+  `#000000`. Chosen loosely in the same warm-to-cool family as the tier ramp
+  (sec 7) without reusing those exact tokens, so the mark reads as "brand,"
+  never as a tier chip.
+- Derived raster assets (generated from the canonical SVG, not redrawn):
+  `public/brand/rankle-icon.png` (512x512, transparent, PNG fallback for
+  browsers without SVG favicon support) and `public/brand/rankle-apple-icon.png`
+  (180x180, opaque plain white square, mark centered with generous padding —
+  deliberately NOT alpha-transparent, since iOS renders transparent regions in
+  apple-touch-icon files as black; iOS applies its own corner mask on top).
+- App/browser icon and favicon use the standalone mark only, never the
+  wordmark. Wired via `app/layout.tsx` metadata `icons`, not a hardcoded
+  `app/icon.*` file, so the canonical asset in `public/brand/` stays the only
+  copy.
+- Wordmark stays plain text ("Rankle", `font-display`/Bricolage Grotesque,
+  bold) in the header (`components/layout/app-header.tsx`) — no wordmark SVG
+  or custom font asset. The mark renders at 22x22 next to it via a plain
+  `<img>` (not `next/image`, which blocks local SVGs without widening
+  `next.config.ts`'s `dangerouslyAllowSVG` repo-wide for a single static
+  logo), decorative (`alt=""`, `aria-hidden`) since the adjacent text already
+  names the product.
+- No white/dark variant of the mark exists yet (`rankle-mark-white.svg`) and
+  no combined mark+wordmark asset exists yet (`rankle-logo.svg`) — the app is
+  light-mode only (sec 8) and nothing currently consumes a combined lockup.
+  Add either only when a real consumer needs one.
+
 ---
 
 ## 3. Design Source Priority
@@ -846,11 +883,12 @@ Decided in Milestone 1 (Step 2):
 - [x] Tier colors — provisional, AA-verified (sec 7); finalize after first board
 - [x] Radius scale — sec 10
 - [x] Light/dark strategy — light only for MVP; tokens structured for later dark (sec 8)
+- [x] Logo/wordmark — Milestone 9: three overlapping rounded cards mark +
+  plain-text "Rankle" wordmark (sec 2, "Brand Mark")
 
 Still open:
 
 - [ ] Product name (currently "Rankle")
-- [ ] Logo/wordmark
 - [ ] Motion timing
 - [ ] Card style (settle alongside the first tier board / drag feedback)
 - [ ] Landing-page visual language (deferred to Polish phase)

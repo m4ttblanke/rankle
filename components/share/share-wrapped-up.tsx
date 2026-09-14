@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { FocusHeading } from "@/components/layout/focus-heading";
 import type { ShareTeaser } from "@/lib/game/share-schema";
 
 /**
@@ -13,9 +14,9 @@ import type { ShareTeaser } from "@/lib/game/share-schema";
 export function ShareWrappedUp({ share }: { share: ShareTeaser }) {
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col items-center justify-center gap-3 px-4 py-16 text-center sm:px-6">
-      <h1 className="font-display text-3xl font-extrabold tracking-tight text-foreground">
+      <FocusHeading className="font-display text-3xl font-extrabold tracking-tight text-foreground">
         This Rankle has already wrapped up
-      </h1>
+      </FocusHeading>
       <p className="max-w-xs text-sm text-muted">
         {share.tierlistTitle} isn&rsquo;t today&rsquo;s game anymore, so there&rsquo;s
         no way to unlock this ranking now.

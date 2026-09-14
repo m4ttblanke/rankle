@@ -4,14 +4,17 @@ import {
   hottestTake,
   isEarlyResults,
 } from "@/lib/game/results";
+import type { CountdownState } from "@/lib/game/countdown";
 import type { FriendResultEntry } from "@/lib/game/get-friend-results";
 import type { GameResults } from "@/lib/game/results-schema";
+import type { StreakSummary } from "@/lib/game/streaks";
 import { ShareButton } from "@/components/share/share-button";
 import { CommunityTierList } from "./community-tier-list";
 import { ComparisonList } from "./comparison-list";
 import { FriendsComparison } from "./friends-comparison";
 import { HottestTakeCard } from "./hottest-take-card";
 import { ResultsHeading } from "./results-heading";
+import { ReturnCue } from "./return-cue";
 
 /**
  * The results reveal (Milestone 4). Server-rendered — the data is already
@@ -24,6 +27,8 @@ import { ResultsHeading } from "./results-heading";
 export function ResultsView({
   results,
   friendResults,
+  streak,
+  countdown,
 }: {
   results: GameResults;
   /** `null` for a signed-out visitor (guest or anonymous) -- the Friends
@@ -31,6 +36,9 @@ export function ResultsView({
    *  empty. An empty array is the normal "no friends have played yet" state
    *  for a signed-in caller, and IS rendered. */
   friendResults: FriendResultEntry[] | null;
+  /** `null` for a guest -- no streak claim is made for them. */
+  streak: StreakSummary | null;
+  countdown: CountdownState;
 }) {
   const { tierlist, items, myRanking, totalSubmissions } = results;
   const early = isEarlyResults(results);
@@ -120,6 +128,8 @@ export function ResultsView({
         </p>
         <ShareButton submissionId={results.submissionId} gameTitle={tierlist.title} />
       </section>
+
+      <ReturnCue streak={streak} countdown={countdown} />
     </div>
   );
 }

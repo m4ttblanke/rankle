@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { FocusHeading } from "@/components/layout/focus-heading";
 
 /**
  * Shown for a malformed token, an unknown token, or a revoked share
@@ -9,9 +10,9 @@ import Link from "next/link";
 export function InvalidShare() {
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-16 text-center">
-      <h1 className="font-display text-3xl font-extrabold tracking-tight text-foreground">
+      <FocusHeading className="font-display text-3xl font-extrabold tracking-tight text-foreground">
         This link doesn&rsquo;t work
-      </h1>
+      </FocusHeading>
       <p className="max-w-xs text-sm text-muted">
         It may be mistyped, expired, or no longer available.
       </p>

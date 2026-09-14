@@ -7,6 +7,7 @@ import { getDailyGame } from "@/lib/game/get-daily-game";
 import { getFriendPlayedStatus } from "@/lib/game/friends";
 import { getGuestId } from "@/lib/game/guest";
 import { getShare } from "@/lib/game/get-share";
+import { getMyStreaks } from "@/lib/game/get-streaks";
 import { shareTokenSchema } from "@/lib/game/share-schema";
 import { hasSubmittedRanking } from "@/lib/game/submission-state";
 
@@ -82,14 +83,19 @@ export default async function HomePage({ searchParams }: Props) {
     }
   }
 
+  const user = await getCurrentUser();
+
   // Spoiler-safe, pre-submission friend activity count (docs/MANUAL.md sec
   // 17: "5 friends played today" — a count only, never who or what they
   // ranked). Account-only and only worth a fetch when there's a game to ask
   // about; a signed-out visitor never triggers this call at all.
   const friendsPlayedCount =
-    game && (await getCurrentUser())
-      ? (await getFriendPlayedStatus(game.id)).filter((f) => f.played).length
-      : null;
+    game && user ? (await getFriendPlayedStatus(game.id)).filter((f) => f.played).length : null;
+
+  // A light pre-submission nudge for a signed-in player with an active
+  // streak — never a "0 streak" flex before their first game (docs/TODO.md
+  // M9 brief). The full streak + countdown reveal lives on `/results`.
+  const streak = user ? await getMyStreaks() : null;
 
   return (
     <>
@@ -107,6 +113,11 @@ export default async function HomePage({ searchParams }: Props) {
               {friendsPlayedCount ? (
                 <p className="text-xs font-medium text-muted">
                   {friendsPlayedCount} friend{friendsPlayedCount === 1 ? "" : "s"} played today
+                </p>
+              ) : null}
+              {streak && streak.current > 0 ? (
+                <p className="text-xs font-medium text-muted">
+                  🔥 {streak.current} Rankle{streak.current === 1 ? "" : "s"} in a row
                 </p>
               ) : null}
             </div>

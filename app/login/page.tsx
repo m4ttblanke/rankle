@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { SignInForm } from "@/components/auth/sign-in-form";
 import { AppHeader } from "@/components/layout/app-header";
+import { FocusHeading } from "@/components/layout/focus-heading";
 import { getCurrentUser } from "@/lib/auth/current-user";
 
 type Props = { searchParams: Promise<{ error?: string }> };
@@ -21,9 +22,9 @@ export default async function LoginPage({ searchParams }: Props) {
       <AppHeader />
       <div className="mx-auto flex w-full max-w-sm flex-1 flex-col justify-center gap-5 px-4 py-10 sm:px-6">
         <div className="flex flex-col gap-1.5 text-center">
-          <h1 className="font-display text-3xl font-extrabold tracking-tight text-foreground">
+          <FocusHeading className="font-display text-3xl font-extrabold tracking-tight text-foreground">
             Sign in
-          </h1>
+          </FocusHeading>
           <p className="text-sm text-muted">
             Save your Rankle history across devices.
           </p>

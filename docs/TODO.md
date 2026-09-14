@@ -112,11 +112,11 @@ Periodically clean up old completed items.
 - [ ] Add topic backlog (out of scope for Milestone 8 — see CLAUDE.md's M8 scope note)
 - [x] Add duplicate-game action (Milestone 8 — `duplicate_tierlist` RPC)
 - [x] Add emergency disable/unpublish action (Milestone 8 — `unschedule_tierlist`, future-scheduled-only, returns to draft; no separate "disable" verb was added — see the Milestone 8 write-up under Completed for why)
-- [ ] Once the Milestone 8 migration is applied to the remote project, update
+- [ ] The Milestone 8 migration is now applied to the remote project (and M9's
+  `next_release_date` migration as of 2026-09-13). Update
   `lib/game/get-daily-game.integration.test.ts` to also (or instead) call the
-  new `get_daily_game()` RPC — it currently only smoke-tests the raw
-  `tierlists` query the resolver used *before* M8, which the remote project
-  still runs until that migration ships there.
+  `get_daily_game()` RPC — it still only smoke-tests the raw `tierlists` query
+  the resolver used *before* M8.
 
 ## Accounts
 
@@ -131,11 +131,14 @@ Periodically clean up old completed items.
 - [ ] Add avatar support (deferred — initials placeholder only,
   `components/profile/avatar.tsx`; `avatar_url` stays unused)
 - [x] Add history page (`/profile`, `/history/[submissionId]`)
-- [ ] Add current streak (explicitly out of scope for M6/M9)
-- [ ] Add longest streak (same)
-- [ ] Add total games played (history *count* exists; a dedicated stat is
-  deferred)
-- [ ] Add streak unit tests (no streak feature yet)
+- [x] Add current streak (Milestone 9 — `lib/game/streaks.ts`,
+  `components/profile/streak-stats.tsx`; consecutive released Rankles played,
+  not calendar days)
+- [x] Add longest streak (Milestone 9 — same)
+- [x] Add total games played (Milestone 9 — same `StreakStats` row)
+- [x] Add streak unit tests (Milestone 9 — `lib/game/streaks.test.ts`,
+  `lib/game/get-next-release.ts`'s countdown covered by
+  `lib/game/countdown.test.ts`)
 
 ## Friends
 
@@ -199,9 +202,12 @@ Periodically clean up old completed items.
 
 ## Archive
 
-- [ ] Build archive browse experience
-- [ ] Allow historical play
-- [ ] Keep historical play separate from current streak
+- [x] Build archive browse experience (Milestone 9 — `/archive`,
+  `getArchive()`, read-only, open to signed-out visitors)
+- [ ] Allow historical play (deliberately out of scope for Milestone 9 — no
+  submission path to an old game; see `ArchiveList`)
+- [ ] Keep historical play separate from current streak (moot until the item
+  above exists)
 - [ ] Add friend completion indicators for archive games
 
 ## Moderation

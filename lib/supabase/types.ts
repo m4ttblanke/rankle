@@ -486,6 +486,7 @@ export type Database = {
         Args: { p_guest_id?: string; p_token: string }
         Returns: Json
       }
+      get_next_release_date: { Args: never; Returns: string | null }
       has_submitted_ranking: {
         Args: { p_guest_id?: string; p_tierlist_id: string }
         Returns: boolean

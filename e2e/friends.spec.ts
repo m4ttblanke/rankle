@@ -185,6 +185,53 @@ test("cannot friend yourself; search excludes your own account", async ({ page }
   await expect(page.getByText(/no matching users/i)).toBeVisible();
 });
 
+test("a failed remove (session lost mid-page) shows a visible error and never falsely removes the friend", async ({
+  page,
+  browser,
+}) => {
+  const emailA = uniqueEmail("friends-remove-fail-a");
+  const emailB = uniqueEmail("friends-remove-fail-b");
+
+  await page.goto("/login");
+  await signInViaMagicLink(page, emailA);
+
+  const contextB = await browser.newContext();
+  const pageB = await contextB.newPage();
+  await pageB.goto("/login");
+  await signInViaMagicLink(pageB, emailB);
+  const usernameB = await currentUsername(pageB);
+
+  await page.goto("/friends");
+  await page.getByLabel(/search by username/i).fill(usernameB);
+  await page.getByRole("button", { name: /^add$/i }).click();
+
+  await pageB.goto("/friends");
+  await pageB.getByRole("button", { name: /^accept$/i }).click();
+  await expect(pageB.getByRole("heading", { name: /^your friends \(1\)/i })).toBeVisible();
+
+  await page.goto("/friends");
+  await expect(page.getByRole("heading", { name: /^your friends \(1\)/i })).toBeVisible();
+
+  // Simulate a session that expired while the tab stayed open (a real,
+  // reachable failure — `removeFriend` returns `{ ok: false, reason:
+  // "unauthenticated" }` server-side, not a mocked/injected fault) rather
+  // than an unreachable RPC-level error most of these RPCs are idempotent
+  // against.
+  await page.context().clearCookies();
+  await page.getByRole("button", { name: /^remove$/i }).click();
+  await page.getByRole("button", { name: /^confirm$/i }).click();
+
+  // visible, not sr-only: getByRole("alert") only matches an in-flow,
+  // rendered element, and toBeVisible() additionally requires it to have
+  // layout (not display:none/sr-only-clipped). Scoped by text since Next's
+  // own route announcer also carries role="alert" (empty, off-screen).
+  const removeError = page.getByRole("alert").filter({ hasText: /couldn.t remove/i });
+  await expect(removeError).toBeVisible();
+  await expect(page.getByRole("heading", { name: /^your friends \(1\)/i })).toBeVisible();
+
+  await contextB.close();
+});
+
 test("community results and sharing are unaffected by the Friends feature", async ({ page }) => {
   await page.goto("/");
   await rankAndSubmit(page);
