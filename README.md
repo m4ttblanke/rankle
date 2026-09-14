@@ -4,7 +4,7 @@
 
 Rankle is a daily social tier-list game where players rank a new set of items each day, lock in their choices, and then see how their opinions compare with the community and their friends.
 
-Each day introduces a new topic—such as fast-food fries, movies, video games, snacks, or other debatable categories. Players organize the day's items into tiers, submit their ranking, and unlock community results and shared rankings.
+Each day introduces a new topic, such as fast-food fries, movies, video games, snacks, or other debatable categories. Players organize the day's items into tiers, submit their ranking, and unlock community results and shared rankings.
 
 **Rank → Submit → Compare → Share → Return tomorrow**
 
@@ -14,7 +14,7 @@ Each day introduces a new topic—such as fast-food fries, movies, video games, 
 
 Traditional tier-list tools focus on creating standalone rankings. Rankle turns tier lists into a daily social game.
 
-Every day, Rankle publishes one official tier list containing a fixed set of items. Players place each item into a tier from **S through D** and submit their ranking.
+Every day, Rankle publishes one official tier list containing a fixed set of items. Players place each item into a tier (**S, A, B, C, F, or N/A**) and submit their ranking.
 
 Once submitted, the ranking is locked. Players can then compare their choices with the community, see where they agreed or disagreed with others, and share their ranking with friends.
 
@@ -30,8 +30,8 @@ The goal is to create a simple daily loop built around opinions, disagreement, a
 
 - One official tier-list topic per day
 - Fixed set of items to rank
-- S, A, B, C, and D tiers
-- Drag-and-drop ranking interface
+- S, A, B, C, F, and N/A tiers (N/A for items the player hasn't tried)
+- Drag-and-drop ranking interface, with a non-drag tap/keyboard alternative
 - Rankings lock after submission
 - Daily release schedule
 - Support for guest and registered players
@@ -53,28 +53,29 @@ Community results remain hidden until the player submits an official ranking.
 
 Rankle is designed around sharing and comparing opinions.
 
-Planned social functionality includes:
+Available now:
 
-- Friends
-- Direct ranking sharing
+- Friends (search, requests, accept/decline, remove)
 - Spoiler-protected share links
 - Ranking history
-- Friend comparisons
+- Post-submission friend ranking comparisons
 - Compatibility scores
-- Head-to-head statistics
+
+Planned:
+
+- Cumulative multi-game head-to-head statistics
 - Private groups
 - Reactions
 
 ### Profiles
 
-Registered users will be able to maintain a Rankle profile containing information such as:
+Registered users maintain a Rankle profile containing:
 
 - Username
 - Display name
-- Avatar
-- Previous tier lists
+- Avatar (initials placeholder today; image upload is planned)
 - Ranking history
-- Player statistics
+- Streak stats (current streak, longest streak, total games played)
 - Friend relationships
 
 ### Admin
@@ -90,7 +91,7 @@ Administrators manage the daily Rankle content, including:
 
 Additional administrative analytics and content-management tools are planned as the product develops.
 
-> Some features described above are planned and may not yet be available in the current build.
+> Some social features described above (private groups, reactions, cumulative head-to-head statistics) remain planned and are not yet available.
 
 ---
 
@@ -122,8 +123,9 @@ Additional administrative analytics and content-management tools are planned as 
 
 ### Infrastructure
 
-- **Vercel** — application hosting
-- **Supabase** — database, authentication, and storage
+- **Vercel** (application hosting)
+- **Supabase** (database, authentication, and storage)
+- **Vercel Web Analytics** (anonymous traffic analytics)
 
 ---
 
@@ -176,7 +178,7 @@ Registered users can access account-specific functionality such as:
 - Profile
 - Ranking history
 - Saved submissions
-- Social features as they become available
+- Friends and friend comparisons
 
 Authenticated users are still subject to database-level authorization and spoiler protection.
 
@@ -251,13 +253,14 @@ Copy the example environment file:
 cp .env.example .env.local
 ```
 
-Configure the required values in `.env.local`. As of Milestone 1:
+Configure the required values in `.env.local`:
 
 ```text
 NEXT_PUBLIC_SUPABASE_URL=                  # https://<project-ref>.supabase.co
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=     # the "sb_publishable_..." key
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=      # the "sb_publishable_..." key
 NEXT_PUBLIC_APP_URL=                       # optional; defaults to http://localhost:3000
-SUPABASE_SERVICE_ROLE_KEY=                # server-only; not used yet, leave blank
+SUPABASE_SERVICE_ROLE_KEY=                 # server-only; used only for guest-to-account claiming (app/auth/callback)
+GUEST_COOKIE_SECRET=                       # server-only; signs the guest identity cookie, >= 16 chars
 ```
 
 `.env.example` is the authoritative list, with notes on which values are public
@@ -321,7 +324,7 @@ http://localhost:3000
 
 Rankle uses PostgreSQL through Supabase.
 
-The initial database includes:
+The database includes:
 
 - `profiles`
 - `tierlists`
@@ -330,6 +333,9 @@ The initial database includes:
 - `submission_items`
 - `tierlist_item_stats`
 - `shares`
+- `claimed_guest_submissions`
+- `friend_requests`
+- `friendships`
 
 Database responsibilities include:
 
@@ -355,7 +361,7 @@ Changes should be tested before being merged or deployed.
 ```bash
 npm run lint        # ESLint (flat config)
 npm run typecheck   # tsc --noEmit
-npm test            # Vitest — unit + read-only integration
+npm test            # Vitest (unit + read-only integration)
 npm run test:e2e    # Playwright end-to-end (auto-starts the dev server)
 npm run build       # production build (also runs the type check)
 ```
@@ -372,10 +378,10 @@ vars are absent.
 
 ### End-to-End (Playwright)
 
-`e2e/` — currently covers the daily-game shell, the empty state, the read-only
-tier board (via a dev-only preview route with sample data), responsive layout at
-320–430px, and the 404 page. Flows such as ranking, submission, results, spoiler
-protection, sharing, auth, and admin will be added as those features land.
+`e2e/` covers the daily-game shell, ranking and submission, results and spoiler
+protection, sharing, authentication (real magic-link flow via local Mailpit),
+friends, admin, the archive, and retention/streak features, plus responsive
+layout at 320-430px and the 404 page.
 
 ### Database & RLS Testing
 
@@ -449,7 +455,7 @@ Detailed project documentation lives in `/docs`.
 
 ## Deployment
 
-Rankle is designed to deploy using:
+Rankle is live in production at https://rankle-theta.vercel.app, deployed using:
 
 - **Vercel** for the Next.js application
 - **Supabase** for PostgreSQL, authentication, and storage
@@ -484,23 +490,26 @@ Security-sensitive changes should be reviewed against `docs/SECURITY.md`.
 
 ## Roadmap
 
-Rankle is under active development.
+Rankle is live and under active development.
 
-Planned areas include:
+Shipped:
 
 - Daily ranking experience
 - Community results
 - Sharing
-- User accounts
-- Ranking history
-- Friends
-- Compatibility and head-to-head statistics
-- Private groups
-- Reactions
+- User accounts and ranking history
+- Friends and compatibility scores
 - Streaks
 - Admin content management
-- Analytics
+- Anonymous traffic analytics
+
+Planned:
+
+- Cumulative head-to-head statistics
+- Private groups and reactions
 - Contact-based friend discovery
+- Product analytics (behavioral metrics)
+- Production email via custom SMTP (replacing Supabase's built-in sender)
 
 See `docs/TODO.md` for the current development roadmap.
 
