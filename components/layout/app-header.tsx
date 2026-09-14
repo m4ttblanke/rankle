@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { signOut } from "@/app/actions/sign-out";
+import { isCurrentUserAdmin } from "@/lib/admin/require-admin";
 import { getCurrentProfile } from "@/lib/auth/current-user";
 
 /**
@@ -8,9 +9,16 @@ import { getCurrentProfile } from "@/lib/auth/current-user";
  * a single "Sign in" link. Authenticated: display name -> `/profile`, plus
  * "Sign out". Server Component — reads the current profile itself so every
  * page gets consistent chrome without threading auth state through props.
+ *
+ * "Admin" link (Milestone 10) reuses `isCurrentUserAdmin()` — the same
+ * `is_admin_user()` RPC boundary `requireAdmin()` enforces server-side on
+ * `/admin` itself — rather than a second admin check. This link is purely a
+ * convenience; hiding it from non-admins is not the authorization boundary
+ * (docs/SECURITY.md sec 4), `requireAdmin()` still gates the route itself.
  */
 export async function AppHeader() {
   const profile = await getCurrentProfile();
+  const isAdmin = profile ? await isCurrentUserAdmin() : false;
 
   return (
     <header className="mx-auto flex w-full max-w-2xl items-baseline justify-between gap-3 px-4 pt-5 sm:px-6 sm:pt-8">
@@ -46,6 +54,14 @@ export async function AppHeader() {
             >
               Friends
             </Link>
+            {isAdmin ? (
+              <Link
+                href="/admin"
+                className="font-semibold text-foreground underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-accent"
+              >
+                Admin
+              </Link>
+            ) : null}
             <Link
               href="/profile"
               className="font-semibold text-foreground underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-accent"

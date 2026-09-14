@@ -78,6 +78,11 @@ async function signInAsAdmin(page: Page): Promise<void> {
   if (!match) throw new Error("admin user not found after sign-in");
   const { error } = await serviceClient!.from("profiles").update({ is_admin: true }).eq("id", match.id);
   if (error) throw error;
+
+  // Fresh render after the promotion above — confirms the nav link reflects
+  // real-time admin status, not a stale value from the earlier /profile load.
+  await page.goto("/profile");
+  await expect(page.getByRole("link", { name: "Admin" })).toBeVisible();
 }
 
 function futureDateString(daysFromNow: number): string {
@@ -93,12 +98,15 @@ function randomOffset(min: number, max: number): number {
   return min + Math.floor(Math.random() * (max - min));
 }
 
-test("a signed-out visitor is redirected away from /admin", async ({ page }) => {
+test("a signed-out visitor is redirected away from /admin and sees no Admin nav link", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByRole("link", { name: "Admin" })).not.toBeVisible();
+
   await page.goto("/admin");
   await expect(page).toHaveURL(/^http:\/\/localhost:3000\/$/);
 });
 
-test("a signed-in non-admin is redirected away from /admin", async ({ page }) => {
+test("a signed-in non-admin is redirected away from /admin and sees no Admin nav link", async ({ page }) => {
   const email = uniqueEmail("regular");
   await page.goto("/login");
   await page.getByLabel("Email").fill(email);
@@ -106,6 +114,7 @@ test("a signed-in non-admin is redirected away from /admin", async ({ page }) =>
   const link = await getLatestMagicLink(email);
   await page.goto(link);
   await expect(page).toHaveURL(/\/profile\/?$/);
+  await expect(page.getByRole("link", { name: "Admin" })).not.toBeVisible();
 
   await page.goto("/admin");
   await expect(page).toHaveURL(/^http:\/\/localhost:3000\/$/);

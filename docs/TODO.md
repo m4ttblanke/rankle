@@ -120,6 +120,20 @@ Periodically clean up old completed items.
 
 ## Accounts
 
+- [ ] Reduce re-authentication friction after sign-out ("remember this
+  device" or similar). Observed 2026-09-14: every sign-in currently requires
+  a fresh magic-link email round-trip, including shortly after a recent
+  sign-out, which is real friction against the "Return tomorrow" core loop.
+  Needs a deliberate design pass, not a quick toggle — magic-link-only auth
+  (no passwords) means any "remember me" mechanism is itself a form of
+  session/trust extension and has to be reviewed against `docs/SECURITY.md`'s
+  auth invariants before implementation. Options to evaluate: simply confirm
+  Supabase's default refresh-token session length is long-lived and the
+  friction is actually about explicit sign-out (which is supposed to fully
+  end the session) vs. unexpected early expiry; a scoped "trusted device"
+  cookie that shortens (not skips) re-verification within a short window;
+  or extending session/refresh-token lifetime itself. Do not weaken the
+  email-verification guarantee without deciding this deliberately.
 - [x] Configure chosen Supabase Auth providers (email magic link only; local
   `supabase/config.toml` `[auth]` site_url/redirect URLs — production TBD
   until a domain exists, see `docs/DEPLOY.md` sec 9-10)
@@ -260,6 +274,31 @@ provider decision (e.g. PostHog) and are explicitly not implemented yet:
     `docs/SECURITY.md` sec 32)
   - Update `docs/DEPLOY.md` and `docs/OPS.md` with the setup, monitoring,
     credential-rotation, and troubleshooting procedures once configured
+- [ ] **Migrate production app to `rankle.io` as the canonical domain.**
+  `rankle.io` is now owned (registered via Vercel, 2026-09-14; DNS zone
+  already has `auth.rankle.io` configured for Resend — see the Resend/SMTP
+  item above). Production currently still runs on the Vercel-issued
+  `rankle-theta.vercel.app`, and that was intentional scope discipline
+  during the Resend task (explicitly told not to migrate the site as part
+  of that work). Observed 2026-09-14: `rankle.io` already resolves to the
+  Rankle homepage, but internal navigation still lands on
+  `rankle-theta.vercel.app` — inconsistent, and worth understanding why
+  (Vercel account-level domain association vs. deliberate project
+  attachment) before deciding whether it just needs finishing or needs
+  correcting. Full migration needs, together, not piecemeal (`docs/DEPLOY.md`
+  sec 14's own checklist):
+  - Attach `rankle.io` to the Vercel project as the primary production
+    domain (decide apex vs. `www` redirect behavior)
+  - Update `NEXT_PUBLIC_APP_URL` to the new domain
+  - Update Supabase Auth Site URL and the redirect URL allowlist to
+    `https://rankle.io/**` (decide whether to keep `rankle-theta.vercel.app`
+    in the allowlist during a transition period or cut over cleanly)
+  - Update OpenGraph/share metadata base URL
+  - Decide what happens to `rankle-theta.vercel.app` after cutover (redirect
+    vs. leave live) so old shared links don't break
+  - Re-run the same production auth verification done for the Resend
+    migration (magic link, PKCE callback, admin access, protected routes)
+    against the new domain before calling it done
 - [ ] Configure production error monitoring
 - [ ] Verify backup/restore process
 - [ ] Add aggregate rebuild script
@@ -362,7 +401,9 @@ These are not commitments.
 Track unresolved product choices here until decided.
 
 - [ ] Final product name
-- [ ] Final production domain
+- [x] Final production domain — `rankle.io` (registered via Vercel,
+  2026-09-14). App migration itself is separate tracked work (Operations
+  section above) — production still runs on `rankle-theta.vercel.app` today.
 - [x] Canonical application timezone confirmation — `America/Los_Angeles`
   (`private.app_tz()`; verified on both local and the remote project)
 - [ ] Guest submission persistence approach
