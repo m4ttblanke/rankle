@@ -28,11 +28,18 @@ import { laDateString } from "./timezone";
  *    never one query per archive row.
  */
 export async function getArchive(): Promise<ArchiveEntry[]> {
+  // Called before the try/catch below, same convention as getMyHistory() /
+  // getSubmissionDetail() — cookies() must throw uncaught here so Next's
+  // dynamic-rendering bailout reaches the renderer instead of being
+  // swallowed as a generic fetch failure (it otherwise statically prerenders
+  // this page with an empty archive).
+  const user = await getCurrentUser();
+
   try {
     const supabase = await createClient();
     const today = laDateString(new Date());
 
-    const [{ data: rows, error }, game, user] = await Promise.all([
+    const [{ data: rows, error }, game] = await Promise.all([
       supabase
         .from("tierlists")
         .select("id, slug, title, release_date")
@@ -41,7 +48,6 @@ export async function getArchive(): Promise<ArchiveEntry[]> {
         .lte("release_date", today)
         .order("release_date", { ascending: false }),
       getDailyGame(),
-      getCurrentUser(),
     ]);
     if (error) throw error;
 
