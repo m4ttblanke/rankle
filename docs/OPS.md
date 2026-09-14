@@ -503,7 +503,121 @@ Unsubmitted user cannot access result payload.
 
 ---
 
-## 27. Operational TODOs
+## 27. Practical Procedures (Milestone 10)
+
+Concrete commands for the checks referenced conceptually above. No new
+tooling — just the actual Vercel CLI / Supabase CLI / Dashboard steps.
+
+### Checking Vercel deployment health/logs
+
+```bash
+vercel ls rankle                     # recent deployments + state
+vercel inspect <deployment-url>      # build/runtime detail for one deployment
+vercel logs <deployment-url>         # runtime function logs (tail with -f)
+```
+
+Dashboard equivalent: the project's **Deployments** tab (build logs) and
+**Logs** tab (runtime/function logs, filterable by status code and path).
+
+### Checking Supabase health/logs
+
+Dashboard → the project → **Logs**: separate explorers for API (PostgREST),
+Postgres, Auth (GoTrue), and Storage. Filter by time range and status code.
+
+For a specific failing RPC, search the Postgres log explorer for its name
+(e.g. `submit_ranking`) — every RPC in this codebase that catches an error
+logs `[<context>] ... code=<pg-error-code>` server-side first (sec 3), so the
+Vercel function log and the Supabase Postgres log for the same failure should
+show up within the same few seconds and can be cross-referenced by time.
+
+### Investigating a failed submission
+
+1. Ask the reporter for game/date, guest-vs-signed-in, and approximate time
+   (sec 23).
+2. Vercel logs around that time for `[submit-ranking]` (see
+   `app/actions/submit-ranking.ts`) — the logged Postgres error code narrows
+   it immediately: `23001` (release_authorization/locked) is expected/normal
+   product behavior, not a bug; anything else warrants a closer look.
+3. Confirm aggregate integrity: `total_submissions` on
+   `tierlist_item_stats` for that game should equal `count(*)` on
+   `submissions` for that `tierlist_id` — a mismatch is the sec 12 aggregate-
+   rebuild scenario, not a submission bug.
+4. Never re-run a user's submission manually — `submit_ranking` is one-shot
+   by design (sec 10); if it failed, the player still can (and should) retry
+   through the UI.
+
+### Investigating an auth problem
+
+1. Supabase Dashboard → **Authentication → Logs** for the affected email/time.
+2. Supabase Dashboard → **Authentication → URL Configuration** — confirm
+   Site URL and Redirect URLs match the actual production domain exactly
+   (`DEPLOY.md` sec 10). A magic link redirecting to the wrong host is almost
+   always this, not application code.
+3. Vercel env vars (Project Settings → Environment Variables) — confirm
+   `NEXT_PUBLIC_APP_URL` matches the real production URL for the Production
+   environment specifically (a Preview-scoped override pointing at
+   `localhost` or a stale preview domain is the other common cause).
+4. `app/auth/callback` only ever redirects to a fixed `/profile` or
+   `/login?error=1` (`docs/SECURITY.md` sec 16) — if users land somewhere
+   else, the bug is upstream (GoTrue config), not the callback route.
+
+### Rollback
+
+**Application:** Vercel Dashboard → **Deployments** → find the last known-good
+deployment → **Promote to Production** (or `vercel rollback` from the CLI).
+Instant; does not touch the database.
+
+**Database:** this project has no automated schema rollback (sec 9, `DEPLOY.md`
+sec 19) — write a new forward-fix migration. Only hand-restore from a Supabase
+backup if data itself (not just schema) is corrupted, and only after reading
+sec 10 below.
+
+### Database migration incidents
+
+1. `npx supabase migration list` (needs `supabase link` or `--project-ref`)
+   compares local migration files against what the remote project has
+   actually applied — use this first to confirm what did or didn't land.
+2. A migration that partially applied: Supabase runs each migration in a
+   transaction, so a failure rolls it back automatically — confirm with (1)
+   rather than assuming partial application.
+3. Never hand-edit schema in the SQL Editor to "match" a migration — write
+   the correction as a new migration file so local/remote/history stay one
+   source of truth (`DEPLOY.md` sec 6).
+
+### Secret compromise / rotation
+
+1. **`GUEST_COOKIE_SECRET`** — generate a new value (`openssl rand -base64
+   32`), set it in Vercel (Production), redeploy. Every existing guest cookie
+   stops verifying (signed out as a guest, not a data loss — sec 21,
+   `docs/SECURITY.md` sec 26).
+2. **`SUPABASE_SERVICE_ROLE_KEY`** — Supabase Dashboard → **Settings → API**
+   → roll the service-role key, update Vercel, redeploy immediately (this key
+   bypasses RLS entirely — treat exposure as Critical, sec 4).
+3. **`NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`** — this one is meant to be
+   public; rotating it is only needed if RLS itself is believed compromised,
+   not for ordinary exposure.
+4. After any rotation: update `.env.local` for local development, confirm the
+   old value no longer works, and note what happened per sec 7.
+
+### Launch-day smoke checks
+
+Run against the real production URL after every deploy that touches auth,
+submission, sharing, or admin:
+
+1. Homepage loads; today's game (or the honest empty state) renders.
+2. Rank every item, submit, confirm the lock-in — results reveal.
+3. Refresh `/results` — ranking is unchanged (immutability holds).
+4. Share the result; open the link in a private/incognito window — locked
+   gate appears, no ranking data in the page source.
+5. Sign in via magic link (a real inbox) — lands on `/profile`.
+6. Visit `/admin` signed out and as a non-admin — both redirected, no admin
+   UI ever flashes.
+7. Check Vercel logs and Supabase logs (above) for unexpected errors during
+   this pass.
+
+---
+
+## 28. Operational TODOs
 
 Longer-term operational improvements belong in `TODO.md`.
 
@@ -520,7 +634,7 @@ Do not implement all of them before usage justifies them.
 
 ---
 
-## 28. Operations Principle
+## 29. Operations Principle
 
 Prefer a small number of tools you understand over a complicated observability stack.
 

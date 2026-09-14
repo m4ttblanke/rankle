@@ -225,6 +225,34 @@ Periodically clean up old completed items.
 
 ## Operations
 
+- [ ] **Production email — replace Supabase's built-in Auth sender with
+  Resend (or other custom SMTP).** Rankle currently uses Supabase Auth's
+  default/built-in email sender for magic-link sign-in; during Milestone 10
+  production testing this hit the built-in sender's project-wide rate limit
+  (`error_code: over_email_send_rate_limit`) after a single test account's
+  sign-in. Magic link is the app's only auth method (`docs/DEPLOY.md` sec 9),
+  so this directly blocks sign-in at any real scale. The default sender
+  remains acceptable for controlled testing only — treat this as a
+  production-readiness item that must be completed before Rankle opens to
+  meaningful public signup volume. Covers:
+  - Create/configure a Resend account
+  - Set up a Rankle sending domain
+  - Configure the DNS records Resend requires for email authentication
+    (SPF/DKIM/etc.)
+  - Configure Resend SMTP credentials in Supabase Auth (Dashboard →
+    Authentication → Email → SMTP Settings)
+  - Use a branded sender, e.g. `Rankle <no-reply@...>`
+  - Verify production magic-link delivery end to end
+  - Verify the callback/PKCE authentication flow still works unchanged
+  - Review and reconfigure Supabase Auth's email rate limits once custom
+    SMTP is active (the current limits are sized for the default sender,
+    not a real provider)
+  - Test deliverability and spam-folder placement
+  - Keep SMTP/API credentials server-side only, never committed (same
+    discipline as `SUPABASE_SERVICE_ROLE_KEY`/`GUEST_COOKIE_SECRET` —
+    `docs/SECURITY.md` sec 32)
+  - Update `docs/DEPLOY.md` and `docs/OPS.md` with the setup, monitoring,
+    credential-rotation, and troubleshooting procedures once configured
 - [ ] Configure production error monitoring
 - [ ] Verify backup/restore process
 - [ ] Add aggregate rebuild script
@@ -295,6 +323,30 @@ These are not commitments.
 - [ ] User-submitted topic suggestions
 - [ ] Curated seasonal themes
 - [ ] Optional custom tier labels for special games
+- [ ] **Rankle Sports** — a sports-focused extension of Rankle: the same
+  core subjective ranking experience (Rank → Submit → Compare → Share,
+  canonical S/A/B/C/F/N/A tiers), applied to sports-related daily topics
+  instead of general ones. Example topics: NBA players, NFL quarterbacks,
+  MLB teams, college football teams, NBA jerseys, stadiums, sports logos,
+  championship teams, all-time players, current players by position,
+  sports rivalries, coaches, sports moments, draft classes, uniforms,
+  mascots. Not part of Milestone 10 or any current milestone — a future
+  product/brand extension to evaluate after the core Rankle launch, with
+  architecture deliberately left open for now. Questions to resolve before
+  designing it:
+  - Mode/category inside Rankle, vs. a distinct branded experience
+  - Sports-specific daily topic scheduling
+  - League/team/sport taxonomy
+  - Seasonal and event-driven Rankles (playoffs, championships, drafts,
+    etc.)
+  - Sports-specific friend/community comparisons
+  - Historical vs. current-player topics
+  - Staying opinion/ranking-driven, not objective sports trivia
+  - Image/logo/player-photo licensing and rights before using any official
+    sports assets
+  - Whether users can follow favorite sports/leagues for more relevant
+    Rankles
+  - A separate URL/route/subdomain/app identity, only if usage justifies it
 
 ---
 
@@ -304,7 +356,8 @@ Track unresolved product choices here until decided.
 
 - [ ] Final product name
 - [ ] Final production domain
-- [ ] Canonical application timezone confirmation
+- [x] Canonical application timezone confirmation — `America/Los_Angeles`
+  (`private.app_tz()`; verified on both local and the remote project)
 - [ ] Guest submission persistence approach
 - [x] Initial authentication providers — email magic link only (Milestone 6)
 - [ ] Whether archived games can be played by guests
@@ -708,7 +761,7 @@ Follow-ups it surfaced:
   anywhere after an accept/decline/cancel/remove completes — same deferred
   class of heading/focus-management issue noted in M4-M6.
 
-## Milestone 8 — admin & scheduling (2026-09-13, local only, not yet applied remotely)
+## Milestone 8 — admin & scheduling (2026-09-13, applied remotely 2026-09-13)
 
 One migration
 (`supabase/migrations/20260912220000_admin_scheduling.sql`) adds:
@@ -797,9 +850,10 @@ replay. Lint, typecheck, and a production build are all clean;
 `/admin`, `/admin/tierlists/new`, `/admin/tierlists/[id]` all render `ƒ`
 (server-rendered on demand), same as every other account-sensitive route.
 
-Not yet applied to the remote Supabase project — approved to implement and
-test locally only; remote deployment is a separate, explicitly-approved
-follow-up step.
+Applied to the remote Supabase project 2026-09-13, verified via the same
+read-only checkpoint discipline used for every remote deployment in this
+project (migration registration, function signature/grants, RLS/table/
+function regression diff against a pre-deploy snapshot).
 
 Follow-ups it surfaced (also tracked above, under Admin/Operations):
 
@@ -807,11 +861,86 @@ Follow-ups it surfaced (also tracked above, under Admin/Operations):
   (shared seeded "live" game, parallel file workers) — confirmed unrelated to
   M8, tracked under Operations above.
 - [ ] `lib/game/get-daily-game.integration.test.ts` still smoke-tests the
-  pre-M8 raw query against the remote project (which hasn't received this
-  migration yet) — tracked under Admin above.
+  pre-M8 raw query rather than the `get_daily_game()` RPC now that both are
+  applied remotely — tracked under Admin above.
 - [ ] No explicit "archive" admin action was built — a superseded game
   naturally stops being current the moment a newer one releases, and the
   historical lock already makes further editing impossible once it has
   submissions, so `archived`/`disabled` remain legacy/reserved schema values
   with no M8 UI verb. Revisit only if a real product need for manually
   marking/organizing very old content emerges.
+
+## Milestone 9 — retention & polish (2026-09-13, applied remotely 2026-09-13)
+
+One migration (`supabase/migrations/20260913000000_next_release_date.sql`)
+adds exactly one function, `public.get_next_release_date()` — the bare date
+of the next future `scheduled` release only (never title/slug/prompt/items),
+`SECURITY DEFINER`, hardened `search_path`, explicit revoke-then-grant to
+`anon`/`authenticated` (the M7/M8 remote-default-ACL lesson applied again).
+Everything else this milestone built — the archive browse, streaks, and the
+post-submit return cue — reads data already exposed by existing RLS/grants;
+no other schema/RPC change was needed.
+
+**Archive** (`/archive`, `lib/game/archive.ts`, `components/archive/
+archive-list.tsx`): read-only browse of every publicly-released Rankle,
+newest first, open to signed-out visitors. Visibility mirrors `private.
+is_tierlist_public()`'s rule explicitly in application code (status in
+`scheduled/live/archived` and `release_date <= today`) rather than trusting
+the admin RLS bypass on `tierlists` alone, so an admin's own visit can't leak
+a draft/future row. A guest gets no played/unplayed indicator at all
+(`played: null`); a signed-in caller gets one batched `getMyHistory()` call
+turned into a slug lookup map, never one query per row. No submission path to
+an old game exists or is planned for this milestone — unplayed past Rankles
+render as plain text, not a link.
+
+**Streaks** (`lib/game/streaks.ts`, `get-streaks.ts`, `components/profile/
+streak-stats.tsx`): "current," "longest," and "total played," computed fresh
+from two already-owned reads (released dates + the caller's own submission
+history) on every request — never a persisted counter, so there is nothing
+that can drift out of sync with the submissions table. Counts consecutive
+*released* Rankles played, not consecutive calendar days (a scheduling gap
+never breaks it), and today's still-open game never counts against the
+streak before the player has had a chance to submit it. Guests get no streak
+at all (`null`) — no fingerprinting/localStorage identity workaround was
+built to give one.
+
+**Return cue / countdown** (`components/results/return-cue.tsx`,
+`components/game/next-release-countdown.tsx`, `lib/game/countdown.ts`): the
+last thing on the results reveal, after sharing. `computeCountdown` is a
+pure function of `get_next_release_date()`'s result and the current instant,
+so it's fully unit-tested without a fragile real-clock dependency; the
+client component only ticks a clock toward an already-server-decided target
+instant, hydration-safe by construction (`remaining` starts `null` on both
+server and client).
+
+**Brand** (`public/brand/rankle-mark.svg` + derived `rankle-icon.png`/
+`rankle-apple-icon.png`, wired via `app/layout.tsx` metadata and the header):
+the first formalized Rankle brand asset — three overlapping rounded cards,
+red/pink-yellow/orange-blue, thin black outline. See `docs/DESIGN.md` sec 2
+("Brand Mark") for the full record; sec 35's "Logo/wordmark" open decision is
+now resolved.
+
+**Per-route loading/error boundaries** (`app/*/loading.tsx`, `app/*/
+error.tsx`, `components/layout/route-error.tsx`, `components/layout/
+skeleton.tsx`): every account-sensitive and content route now has its own
+`loading.tsx` skeleton and `error.tsx` boundary, extracted into two shared
+components once the near-identical per-route versions made the duplication
+obvious, rather than nine bespoke implementations.
+
+270 SQL/RLS assertions (up from 261 — 9 new `get_next_release_date`
+assertions; all M1-M8 assertions unchanged in expected outcome), 438 Vitest
+(up from ~360; new coverage for archive/streaks/countdown/timezone/format-
+date plus the extracted `route-error`/`focus-heading` components), 87
+Playwright (up from 77; 10 new across `e2e/archive.spec.ts`,
+`e2e/retention.spec.ts`, and one added to `e2e/friends.spec.ts` covering a
+real session-loss failure on Remove — visible, non-sr-only error, friend
+never falsely disappears) — all green on a clean `supabase db reset` replay.
+Lint, typecheck, and a production build are all clean.
+
+Follow-ups it surfaced (also tracked above, under Archive/PWA-Retention):
+
+- [ ] Multi-day streak history (2+ consecutive Rankles) has no Playwright
+  coverage — backdating submissions isn't reachable through the UI/seed, so
+  this is covered at the unit level (`lib/game/streaks.test.ts`) only.
+- [ ] "Allow historical play" and "friend completion indicators for archive
+  games" remain open, deliberately deferred (tracked under Archive above).

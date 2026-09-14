@@ -1,0 +1,25 @@
+-- Rankle -- Milestone 10: least-privilege grant hardening.
+--
+-- private.has_submitted(uuid) has held an `anon` EXECUTE grant since its
+-- introduction (20260909003851_submissions_results.sql) -- broader than it
+-- needs. It has exactly three call sites in this schema, none of which
+-- require `anon` to hold the grant directly:
+--
+--   1. stats_select_after_submit_or_admin (`tierlist_item_stats` RLS policy,
+--      20260909003945_rls_security_hardening.sql) -- scoped `to authenticated`
+--      only. `anon` never evaluates this policy at all.
+--   2. public.get_results() -- SECURITY DEFINER, so the nested call to
+--      private.has_submitted() runs as the function's owner, not the
+--      original caller; the caller's own grants are irrelevant here.
+--   3. public.get_share() -- same SECURITY DEFINER reasoning as (2).
+--
+-- Revoking `anon` changes no behavior: an anon caller's `auth.uid()` is
+-- always null, so private.has_submitted() always returned `false` for anon
+-- regardless. This is pure grant hygiene -- the same "narrowest grant that
+-- actually works" discipline every function since Milestone 7 has followed
+-- (docs/SECURITY.md sec 4), applied retroactively to one function that
+-- predates that discipline.
+--
+-- `authenticated` keeps EXECUTE (required by call site 1 above). No function
+-- body changes. No RLS policy changes.
+revoke execute on function private.has_submitted(uuid) from anon;

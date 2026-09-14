@@ -1844,6 +1844,34 @@ end;
 $$;
 
 -- =====================================================================
+-- Milestone 10: least-privilege grant hardening
+-- =====================================================================
+do $$
+begin
+  -- private.has_submitted(uuid) is used only by stats_select_after_submit_or_admin
+  -- (authenticated-only) plus two SECURITY DEFINER callers (get_results,
+  -- get_share) that never need the original caller's own grant -- anon never
+  -- legitimately needs EXECUTE here (20260914065500_harden_has_submitted_grant.sql).
+  perform pg_temp.rec(
+    'privilege catalog: anon has NO EXECUTE on private.has_submitted',
+    not exists (
+      select 1 from information_schema.routine_privileges
+      where routine_schema = 'private' and routine_name = 'has_submitted'
+        and grantee = 'anon'
+    )
+  );
+  perform pg_temp.rec(
+    'privilege catalog: authenticated retains EXECUTE on private.has_submitted',
+    exists (
+      select 1 from information_schema.routine_privileges
+      where routine_schema = 'private' and routine_name = 'has_submitted'
+        and grantee = 'authenticated'
+    )
+  );
+end;
+$$;
+
+-- =====================================================================
 -- results
 -- =====================================================================
 select id, status, name, detail from _t order by id;

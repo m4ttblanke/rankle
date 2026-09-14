@@ -482,6 +482,23 @@ If transactional email is added:
 
 Do not add an email provider until a feature requires it.
 
+**As observed (Milestone 10 launch testing, 2026-09-14):** the production
+Supabase project currently uses Supabase Auth's default/built-in email
+sender for magic-link delivery — no custom SMTP provider is configured.
+That sender enforces a low **project-wide** rate limit (observed as a
+shared quota across the whole project, not per-recipient — a second,
+unrelated address was also rejected in the same window during launch
+testing), surfaced as `error_code: over_email_send_rate_limit` (429).
+
+This is acceptable for a controlled, low-volume launch smoke test, but is
+**not sufficient for real signup volume** — magic-link sign-in is the only
+authentication method this app has (sec 9), so an email-sending bottleneck
+directly blocks account creation. Before broader launch, configure a real
+production SMTP provider (e.g. Resend, Postmark, SES) in the Supabase
+Dashboard (Authentication → Email → SMTP Settings) and verify the sending
+domain. Track this in `docs/TODO.md` until done — do not treat the current
+default sender as production-ready beyond initial testing.
+
 ---
 
 ## 24. SMS
