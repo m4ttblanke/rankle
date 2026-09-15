@@ -23,8 +23,8 @@ Periodically clean up old completed items.
 
 ## Foundation
 
-- [ ] Choose final product name (working name: "Rankle")
-- [ ] Finalize repository/package naming (package `name` set to `rankle`)
+- [x] Choose final product name (working name: "Rankle")
+- [x] Finalize repository/package naming (package `name` set to `rankle`)
 - [x] Initialize Next.js + TypeScript project (Next 16, App Router, Turbopack)
 - [x] Configure Tailwind CSS (v4, CSS-first `@theme`)
 - [ ] Configure shadcn/ui (deferred until a primitive is needed)
