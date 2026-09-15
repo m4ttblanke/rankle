@@ -822,6 +822,15 @@ root cause of a silent, total analytics outage — see sec 21 for rotation.
 Analytics failing this way never affects gameplay, submission, or sharing —
 those paths do not depend on the analytics write succeeding.
 
+**As verified (2026-09-15 production rollout):** the Production/Preview
+split was confirmed against real deployments, not just unit tests — a
+genuine Preview deployment of the shipped commit produced zero rows after
+a confirmed page load reaching the exact call site (row count unchanged
+across an isolated before/after check), while an isolated Production
+request immediately produced one. Reuse this exact before/after row-count
+method (not just reading `VERCEL_ENV`'s configured value) whenever
+verifying this boundary again after a future change to `lib/analytics/log.ts`.
+
 ---
 
 ## 28. Operational TODOs

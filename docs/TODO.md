@@ -254,6 +254,34 @@ traffic/page-view analytics only, `docs/DEPLOY.md` sec 21).
   numbers, auth tokens, or the guest cookie's raw value ever leave the
   server or appear in any event property.
 
+**Production rollout verified (2026-09-15):** migration applied to the
+remote project (`analytics_events`, version `20260915214211`); table/
+constraints/FKs/grants match the design exactly (zero grant to
+`anon`/`authenticated`, confirmed both by catalog inspection and live
+denied SELECT/INSERT attempts); zero existing rows/tables/functions
+mutated. `VERCEL_ENV` gating confirmed against REAL Vercel deployments, not
+just unit tests: a genuine Preview deployment of this exact commit did not
+write a row even after a confirmed page load reaching the call site, while
+an isolated Production request immediately produced one. `share_opened`
+verified live end-to-end (correct event/identity/`share_id`/`share_state`,
+zero prohibited data). `ranking_started`/`ranking_completed`/
+`ranking_submitted` were not exercised via a brand-new production
+submission — the only real identity available in this session already had
+an immutable submission predating this deploy (can't resubmit), and
+manufacturing a second one crosses into "generating analytics volume" the
+brief explicitly warns against; verified instead via the automated suite
+(475 Vitest) plus the fact that they share the exact same
+`logAnalyticsEvent`/`after()`/service-role write path already proven live
+by `daily_game_viewed`/`share_opened`. This is implementation-complete and
+production-verified, not yet product-data-meaningful — see the "immediately
+available vs. needs real usage" split in the rollout's final report.
+**Metrics are technically available now:** daily players, share creation,
+share rate, share→open rate, account conversion, ranking start/completion/
+submission rates (all zero/near-zero until real traffic accumulates).
+**Metrics that need real usage before they mean anything:** share→play
+conversion (needs actual recipients), completion-time percentiles (needs a
+meaningful sample), new-vs-returning and return rate (need multiple days).
+
 ---
 
 # Later
@@ -1258,3 +1286,23 @@ remote migration or any deploy happened — both caught before shipping:**
    submission-rate-by-source breakdown without a real share involved. Fixed
    by computing `isShareForTierlist` once and using that single validated
    result for both `entry_source` and the attribution decision.
+
+**One pre-existing, unrelated issue found during production rollout
+verification (2026-09-15) — not fixed as part of this milestone, since it
+predates it and touches a file this milestone doesn't own:**
+
+- [ ] `components/share/share-button.tsx` shows the same generic "Couldn't
+  create a share link — try again." message for two different failure
+  modes: `createShare` actually failing, and `navigator.clipboard
+  .writeText()` failing after a successful, real share creation. Caught
+  live in production: clicking Share on an admin's own real (pre-existing,
+  claimed) submission returned a real token from `create_share` (verified
+  via Supabase's own request logs — 200, and the idempotent token still
+  resolves at `/share/[token]` correctly) but the UI still showed the
+  creation-failure message, because the clipboard write itself failed in
+  that automated browser context. Misleading but not a data-integrity or
+  security issue — no duplicate share was created (`create_share` is
+  idempotent) and no incorrect analytics were logged. Worth a small fix
+  later (distinguish the two `catch` blocks with different copy) but out of
+  scope here — this file was not touched by the Product Analytics
+  milestone.
