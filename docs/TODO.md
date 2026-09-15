@@ -265,30 +265,52 @@ provider decision (e.g. PostHog) and are explicitly not implemented yet:
   (`docs/SECURITY.md` sec 32). Full setup/troubleshooting procedure:
   `docs/DEPLOY.md` sec 23, `docs/OPS.md` sec 27.
 - [ ] **Migrate production app to `rankle.io` as the canonical domain.**
-  `rankle.io` is now owned (registered via Vercel, 2026-09-14; DNS zone
-  already has `auth.rankle.io` configured for Resend — see the Resend/SMTP
-  item above). Production currently still runs on the Vercel-issued
-  `rankle-theta.vercel.app`, and that was intentional scope discipline
-  during the Resend task (explicitly told not to migrate the site as part
-  of that work). Observed 2026-09-14: `rankle.io` already resolves to the
-  Rankle homepage, but internal navigation still lands on
-  `rankle-theta.vercel.app` — inconsistent, and worth understanding why
-  (Vercel account-level domain association vs. deliberate project
-  attachment) before deciding whether it just needs finishing or needs
-  correcting. Full migration needs, together, not piecemeal (`docs/DEPLOY.md`
-  sec 14's own checklist):
-  - Attach `rankle.io` to the Vercel project as the primary production
-    domain (decide apex vs. `www` redirect behavior)
-  - Update `NEXT_PUBLIC_APP_URL` to the new domain
-  - Update Supabase Auth Site URL and the redirect URL allowlist to
-    `https://rankle.io/**` (decide whether to keep `rankle-theta.vercel.app`
-    in the allowlist during a transition period or cut over cleanly)
-  - Update OpenGraph/share metadata base URL
-  - Decide what happens to `rankle-theta.vercel.app` after cutover (redirect
-    vs. leave live) so old shared links don't break
-  - Re-run the same production auth verification done for the Resend
-    migration (magic link, PKCE callback, admin access, protected routes)
-    against the new domain before calling it done
+  Root cause found (2026-09-14): `rankle.io`/`www.rankle.io` were already
+  correctly attached to the `rankle` Vercel project (both aliased to the
+  same deployment as `rankle-theta.vercel.app`) — the reason navigation kept
+  landing back on the old host was purely that Production's
+  `NEXT_PUBLIC_APP_URL` (a build-time value) was still pinned to
+  `https://rankle-theta.vercel.app`, so every absolute URL the app generated
+  (auth redirect, share link) pointed there regardless of which hostname
+  served the page. Not a Vercel account/project misassociation.
+
+  Completed:
+  - `next.config.ts`: host-matched `redirects()` sends
+    `rankle-theta.vercel.app/*` and `www.rankle.io/*` to `https://rankle.io/*`,
+    preserving path and query string (no Vercel dashboard-level redirect
+    exists for a project's own auto-issued `*.vercel.app` alias, so this had
+    to be framework-level; see `docs/DEPLOY.md` sec 25). Covered by
+    `e2e/domain-redirect.spec.ts`.
+  - `NEXT_PUBLIC_APP_URL` set to `https://rankle.io` for Production only;
+    Preview deliberately left at `https://rankle-theta.vercel.app`
+    unchanged (`docs/DEPLOY.md` sec 13) rather than redesigned as part of
+    this migration.
+  - Supabase Auth Site URL set to `https://rankle.io`; redirect allowlist is
+    now `https://rankle.io/**`, `https://rankle-theta.vercel.app/**`,
+    `http://localhost:3000/**` (applied manually via the Supabase Dashboard
+    — confirmed no other entries existed beforehand and none were removed;
+    `docs/DEPLOY.md` sec 10).
+  - No OpenGraph/canonical metadata existed to update — `app/layout.tsx` has
+    no `metadataBase` and no route sets its own OpenGraph metadata.
+  - Full local regression re-verified with no regressions: SQL/RLS 272/272,
+    Vitest 438/438 (deterministic, `--no-file-parallelism`), Playwright
+    91/91 (87 pre-existing + 4 new redirect tests; one pre-existing
+    `accounts.spec.ts` test is flaky only under full-suite parallelism,
+    unrelated to this change, passes in isolation).
+
+  Remaining before this can be checked off:
+  - Production deployment of the above (blocked pending explicit
+    confirmation — this is a hard-to-reverse production action; see
+    conversation for status)
+  - Post-deploy verification: confirm the live deployment actually shipped
+    with the new `NEXT_PUBLIC_APP_URL` (`docs/OPS.md` sec 27), anonymous
+    smoke test, protected-route check, a real magic-link/PKCE sign-in on
+    `rankle.io` with the existing admin account, old-share-link compatibility,
+    spoiler-gate regression, and a DB row-count comparison against the
+    pre-migration baseline
+  - Decide later (not now) whether to remove the
+    `rankle-theta.vercel.app/**` Supabase redirect-allowlist entry once the
+    cutover has been stable (`docs/OPS.md` sec 27)
 - [ ] Configure production error monitoring
 - [ ] Verify backup/restore process
 - [ ] Add aggregate rebuild script
@@ -393,7 +415,8 @@ Track unresolved product choices here until decided.
 - [ ] Final product name
 - [x] Final production domain — `rankle.io` (registered via Vercel,
   2026-09-14). App migration itself is separate tracked work (Operations
-  section above) — production still runs on `rankle-theta.vercel.app` today.
+  section above) — code/config changes are done, production deployment of
+  them is still pending as of this writing.
 - [x] Canonical application timezone confirmation — `America/Los_Angeles`
   (`private.app_tz()`; verified on both local and the remote project)
 - [ ] Guest submission persistence approach

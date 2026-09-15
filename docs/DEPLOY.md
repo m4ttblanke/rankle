@@ -229,16 +229,27 @@ doesn't match this app's dev server, and magic links silently redirect
 somewhere other than `app/auth/callback` instead of erroring loudly, which is
 why this is called out explicitly rather than left to CLI defaults.
 
-**Production: not yet configured.** Rankle has no production web
-deployment/domain yet (sec 14, "Production URL: TBD"). Once one exists, set
-in the remote project's Dashboard (Authentication → URL Configuration) —
-*never* in `supabase/config.toml`, which does not apply to the remote
-project:
+**Production (remote project's Dashboard → Authentication → URL
+Configuration** — *never* in `supabase/config.toml`, which does not apply to
+the remote project):
 
-- **Site URL:** the production domain (e.g. `https://rankle.example.com`)
-- **Redirect URLs:** `https://rankle.example.com/**` (and the same for any
-  preview deployment domain, if Vercel preview URLs should also support
-  sign-in)
+```text
+Site URL:      https://rankle.io
+
+Redirect URLs: https://rankle.io/**
+               https://rankle-theta.vercel.app/**
+               http://localhost:3000/**
+```
+
+The `rankle-theta.vercel.app` entry is a deliberate compatibility holdover
+from the pre-migration configuration (`docs/TODO.md` "Migrate production app
+to `rankle.io`") — kept so any in-flight magic link sent before the cutover,
+or a browser tab still open on the old host mid-sign-in, still completes.
+Not removed automatically; treat removing it as a separate, later decision
+once the cutover has been stable for a while (`docs/OPS.md` sec 27). No
+preview-deployment domain is in this list — Preview builds still generate
+`emailRedirectTo`/share URLs from `rankle-theta.vercel.app` too (sec 13), so
+they need no allowlist entry of their own.
 
 Avoid wildcard redirects broader than the app's own domain(s).
 
@@ -298,23 +309,64 @@ Configure variables for the correct Vercel environments:
 
 Production secrets should not automatically leak into untrusted preview environments if that creates risk.
 
+`NEXT_PUBLIC_APP_URL` is scoped per-environment rather than shared, since it's
+a build-time value baked into whatever bundle each environment produces:
+
+- **Production:** `https://rankle.io`
+- **Preview:** `https://rankle-theta.vercel.app` — deliberately *not*
+  `rankle.io`. Preview deployments are not the canonical site, and pointing
+  their generated magic-link/share URLs at `rankle.io` would make a Preview
+  build's auth emails and share links claim to be production. Kept at the
+  pre-migration value rather than redesigned as part of this migration (a
+  proper per-deployment Preview URL, e.g. derived from Vercel's `VERCEL_URL`,
+  is a separate improvement — `docs/TODO.md`).
+- **Local:** unset in `.env.local`; `lib/env.ts` defaults to
+  `http://localhost:3000`.
+
+When changing the Production value, remember it's build-time — see
+`docs/OPS.md` sec 27 "Verifying `NEXT_PUBLIC_APP_URL` after deployment" for
+how to confirm a deployment actually shipped with the new value rather than
+trusting the dashboard.
+
 ---
 
 ## 14. Production URL
 
-Once the product domain is selected, record:
-
 ```text
-Production URL: TBD
+Production URL: https://rankle.io
 ```
 
-Update:
+Migrated from the interim Vercel-issued domain (`rankle-theta.vercel.app`) on
+2026-09-14 — see `docs/TODO.md` "Migrate production app to `rankle.io`" for
+the full history. Current state:
 
-- `NEXT_PUBLIC_APP_URL`
-- OAuth redirect configuration
-- Supabase site URLs
-- OpenGraph metadata
-- Any allowed-origin configuration
+- **Canonical:** `https://rankle.io` (apex). This is the only value the app
+  itself should ever construct absolute URLs from
+  (`NEXT_PUBLIC_APP_URL` → `lib/env.ts` → `app/actions/sign-in.ts`'s
+  `emailRedirectTo` and `components/share/share-button.tsx`'s share URL — the
+  only two call sites in the codebase that build an absolute production URL).
+- **`www.rankle.io`:** redirects to the apex. No separate content is ever
+  served there.
+- **`rankle-theta.vercel.app`:** kept live as a compatibility redirect to the
+  apex (same mechanism as `www`, see sec 25) so links shared before the
+  migration keep working. It is not removed from the Vercel domain
+  attachment or the Supabase Auth redirect allowlist as part of this
+  migration — see sec 25 for the removal decision.
+- Both redirects preserve path and query string (`/archive` → `/archive`,
+  `/?share=X` → `/?share=X`).
+
+Updated as part of the migration:
+
+- `NEXT_PUBLIC_APP_URL` (Vercel Production environment; Preview was left
+  pointing at `rankle-theta.vercel.app` unchanged — see sec 25)
+- Supabase Auth Site URL and redirect allowlist (sec 10 of this doc) — via
+  the Supabase Dashboard directly, not scriptable via the MCP tooling
+  available in this repo, so this step is applied manually
+- OpenGraph/canonical metadata: none needed. `app/layout.tsx` sets no
+  `metadataBase` and there is no per-route OpenGraph metadata in the app, so
+  there was nothing hardcoded to a domain to update.
+- No allowed-origin/CORS configuration exists outside Supabase's own Auth
+  redirect allowlist above.
 
 ---
 
@@ -426,6 +478,13 @@ Database rollback:
 Never assume rolling back application code automatically rolls back schema.
 
 Document high-risk migration rollback strategy before applying it.
+
+Domain-migration rollback (rankle.io cutover): full step-by-step procedure is
+`docs/OPS.md` sec 27 "Rollback procedure". In short — restore
+`NEXT_PUBLIC_APP_URL` (Production) to `https://rankle-theta.vercel.app`,
+restore Supabase Auth's Site URL to the same, redeploy, and re-verify. The
+`next.config.ts` redirects and the Vercel domain attachments for
+`rankle.io`/`www.rankle.io` don't need to be touched during rollback.
 
 ---
 
@@ -596,15 +655,26 @@ Current domain configuration:
 
 ```text
 rankle.io — owned, registered via Vercel (2026-09-14), DNS hosted on Vercel.
-  auth.rankle.io — dedicated Resend sending subdomain (see sec 23). Live.
-  Apex/www — NOT yet the production app domain. Production is still
-    https://rankle-theta.vercel.app; NEXT_PUBLIC_APP_URL, Supabase Auth's
-    Site URL, and the redirect URL allowlist are all still pinned there.
-    Vercel already lists rankle.io/www.rankle.io as aliases of the current
-    production deployment, but the app-level migration (env var, Supabase
-    redirect allowlist, OG metadata, old-URL redirect decision) has not
-    been done yet — see docs/TODO.md. Do not treat rankle.io as fully
-    migrated until that's complete.
+  auth.rankle.io — dedicated Resend sending subdomain (see sec 23). Live,
+    untouched by the app-domain migration below (separate DNS records,
+    separate concern — never edit these while working on apex/www routing).
+  Apex (rankle.io) — canonical production app domain. Attached to the
+    `rankle` Vercel project as a Production domain (`vercel domains inspect
+    rankle.io`); NEXT_PUBLIC_APP_URL, Supabase Auth's Site URL, and the
+    app's own absolute-URL construction (sec 14) all point here.
+  www.rankle.io — attached to the same project, redirects to the apex via
+    `next.config.ts` `redirects()` (host-matched, not a Vercel dashboard
+    domain redirect — see below for why).
+  rankle-theta.vercel.app — Vercel's auto-issued production alias for this
+    project, not a domain this account owns (doesn't appear in `vercel
+    domains ls`). Vercel provides no dashboard/CLI mechanism to redirect a
+    project's own auto-issued `*.vercel.app` alias to a different domain, so
+    this is redirected to the apex the same way as www: a host-matched rule
+    in `next.config.ts`, executed at Vercel's edge before the app runs.
+    Kept live (as a redirect, not removed/detached) so links shared before
+    the 2026-09-14 cutover keep working — see `docs/TODO.md` for the
+    migration history and `docs/OPS.md` sec 27 for the removal/rollback
+    decision.
 ```
 
 ---

@@ -455,7 +455,7 @@ Detailed project documentation lives in `/docs`.
 
 ## Deployment
 
-Rankle is live in production at https://rankle-theta.vercel.app, deployed using:
+Rankle is live in production at https://rankle.io, deployed using:
 
 - **Vercel** for the Next.js application
 - **Supabase** for PostgreSQL, authentication, and storage

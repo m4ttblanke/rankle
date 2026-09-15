@@ -16,6 +16,28 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+
+  // rankle.io is canonical (docs/DEPLOY.md sec 25). Vercel has no domain-level
+  // redirect for its own auto-issued `rankle-theta.vercel.app` alias, so both
+  // that host and `www.rankle.io` redirect here at the framework level —
+  // preserves path/query automatically, never matches the apex itself so it
+  // can't loop.
+  async redirects() {
+    return [
+      {
+        source: "/:path*",
+        has: [{ type: "host", value: "rankle-theta.vercel.app" }],
+        destination: "https://rankle.io/:path*",
+        permanent: true,
+      },
+      {
+        source: "/:path*",
+        has: [{ type: "host", value: "www.rankle.io" }],
+        destination: "https://rankle.io/:path*",
+        permanent: true,
+      },
+    ];
+  },
 };
 
 export default nextConfig;

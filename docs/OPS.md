@@ -572,6 +572,81 @@ show up within the same few seconds and can be cross-referenced by time.
 5. If the failure looks email-specific rather than a redirect/callback
    issue, see "Investigating a failed magic-link email (Resend)" below.
 
+### Domain/DNS troubleshooting (rankle.io cutover)
+
+Canonical production URL is `https://rankle.io` (`docs/DEPLOY.md` sec 14,
+sec 25). If the app appears to serve the wrong host or auth/share links point
+somewhere unexpected:
+
+1. **Confirm DNS/TLS first.** `vercel domains inspect rankle.io` — Nameservers
+   should show `ns1.vercel-dns.com` / `ns2.vercel-dns.com` both checked, and
+   the Projects section should list `rankle` with `rankle.io, www.rankle.io`.
+   `curl -sI https://rankle.io` should return `200` with a valid cert (no TLS
+   warning); if it doesn't, this is a Vercel domain issue, not application
+   code.
+2. **Confirm `NEXT_PUBLIC_APP_URL` actually shipped.** This is a build-time
+   value — changing it in Vercel's dashboard does nothing to an
+   already-built deployment (sec 27 "Verifying `NEXT_PUBLIC_APP_URL` after
+   deployment" below). Check the live page source/share link/magic-link
+   destination, not just the dashboard's env var value.
+3. **Old-hostname redirect not firing?** `rankle-theta.vercel.app` and
+   `www.rankle.io` redirect to `rankle.io` via a host-matched rule in
+   `next.config.ts` (`redirects()`), not a Vercel dashboard domain redirect —
+   Vercel has no domain-level redirect for its own auto-issued
+   `<project>.vercel.app` alias, so this had to be framework-level. If the
+   redirect stops working, check that rule still exists in `next.config.ts`
+   and that the deployed build actually includes it (same build-time caveat
+   as above — redirects compiled into the build, not live-editable).
+4. **Do not touch `auth.rankle.io` while debugging apex/www routing.** It is
+   a separate DNS subdomain used only for Resend sending (`docs/DEPLOY.md`
+   sec 23) and shares nothing with the app-serving DNS records.
+
+#### Verifying `NEXT_PUBLIC_APP_URL` after deployment
+
+The Vercel dashboard showing the right value is not sufficient proof — it
+only takes effect in the next build. To verify a specific deployment
+actually has it baked in:
+
+```bash
+vercel env pull /tmp/prod-verify.env --environment=production --yes
+grep NEXT_PUBLIC_APP_URL /tmp/prod-verify.env   # confirms the *stored* value
+rm /tmp/prod-verify.env                          # delete immediately — do not leave env dumps on disk
+```
+
+That only confirms what's stored, not what shipped. To confirm a live
+deployment was actually *built* with it, check the rendered page: view source
+on `https://rankle.io/login` and confirm any client-visible reference to the
+app URL (e.g. the share link a signed-in session would generate) reads
+`rankle.io`, not the old host. `vercel inspect <deployment-url>` also shows
+which commit/build produced the live deployment, useful for confirming a
+redeploy actually happened after the env var change.
+
+#### Rollback procedure
+
+If the new domain breaks auth or gameplay, restore the previous known-good
+configuration — do not improvise:
+
+1. **Vercel → Environment Variables**: set `NEXT_PUBLIC_APP_URL` (Production)
+   back to `https://rankle-theta.vercel.app`. Trigger a fresh deployment
+   (env var changes don't apply retroactively — same caveat as above).
+2. **Supabase Dashboard → Authentication → URL Configuration**: set Site URL
+   back to `https://rankle-theta.vercel.app`. Leave the redirect allowlist
+   alone if `https://rankle-theta.vercel.app/**` and
+   `http://localhost:3000/**` are both still present — they should be, since
+   the migration only ever *added* `https://rankle.io/**` rather than
+   removing anything.
+3. **`next.config.ts` redirects**: leave them in place. They only redirect
+   `rankle-theta.vercel.app` and `www.rankle.io` traffic *to* `rankle.io`; if
+   `rankle.io` itself is the thing that's broken, revert or comment out the
+   `redirects()` block too so `rankle-theta.vercel.app` keeps serving the app
+   directly instead of bouncing users to a broken domain.
+4. **Vercel domain attachment**: do not detach `rankle.io`/`www.rankle.io`
+   from the project as part of rollback — they can keep pointing at the same
+   deployment; the app-level config above is what actually controls user-
+   facing behavior.
+5. Redeploy, then re-run the sec 26 auth/gameplay verification against
+   `https://rankle-theta.vercel.app` before declaring rollback complete.
+
 ### Investigating a failed magic-link email (Resend)
 
 Production custom SMTP is Resend (`docs/DEPLOY.md` sec 23,

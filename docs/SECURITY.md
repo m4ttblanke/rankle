@@ -542,6 +542,14 @@ unchanged. The Resend API key used as the SMTP credential is entered
 directly into the Supabase Dashboard and never touches this repository or
 the application's own environment variables (sec 32).
 
+**As built (2026-09-14, domain cutover):** the production redirect
+allowlist deliberately retains `https://rankle-theta.vercel.app/**`
+alongside the new `https://rankle.io/**` (`docs/DEPLOY.md` sec 10) — a
+narrow, explicit compatibility entry for the specific old host, not a
+broadened wildcard, so it does not widen the open-redirect surface beyond
+what already existed pre-migration. Removing it is a deliberate later
+decision (`docs/OPS.md` sec 27), not an oversight.
+
 See `DEPLOY.md` for environment setup.
 
 ---
