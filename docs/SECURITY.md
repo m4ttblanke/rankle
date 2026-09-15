@@ -534,6 +534,14 @@ a session and redirects to a fixed destination (`/profile` on success,
 is no open-redirect surface in the callback. See `docs/DEPLOY.md` sec 9-10
 for the exact local/production redirect URL configuration this requires.
 
+**As built (2026-09-14):** production magic-link delivery runs through
+Resend custom SMTP rather than Supabase's built-in sender (`docs/DEPLOY.md`
+sec 23). This changes only *how the email is sent* — the PKCE flow, the
+fixed-destination callback, and the redirect URL allowlist above are
+unchanged. The Resend API key used as the SMTP credential is entered
+directly into the Supabase Dashboard and never touches this repository or
+the application's own environment variables (sec 32).
+
 See `DEPLOY.md` for environment setup.
 
 ---
@@ -881,8 +889,17 @@ Never commit:
 - OAuth client secrets
 - SMS API secrets
 - Monitoring auth tokens
+- Resend API keys / SMTP credentials
 
 Maintain `.env.example` with names only.
+
+**Resend/SMTP credential (as built, 2026-09-14):** the Resend API key used
+as Supabase Auth's SMTP password is infrastructure secret, same tier as the
+above. It is entered only into the Supabase Dashboard's SMTP Settings form —
+never added to `.env.example`, Vercel environment variables, or any file in
+this repository, since the application itself never sends email directly
+(Supabase Auth owns SMTP delivery entirely). Rotate it via the procedure in
+`docs/OPS.md` sec 21/27 if exposure is suspected.
 
 ---
 

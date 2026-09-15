@@ -499,22 +499,69 @@ If transactional email is added:
 
 Do not add an email provider until a feature requires it.
 
-**As observed (Milestone 10 launch testing, 2026-09-14):** the production
-Supabase project currently uses Supabase Auth's default/built-in email
-sender for magic-link delivery — no custom SMTP provider is configured.
-That sender enforces a low **project-wide** rate limit (observed as a
-shared quota across the whole project, not per-recipient — a second,
-unrelated address was also rejected in the same window during launch
-testing), surfaced as `error_code: over_email_send_rate_limit` (429).
+**As built (2026-09-14):** production magic-link email is sent through
+**Resend custom SMTP**, replacing Supabase Auth's default/built-in sender.
+The built-in sender enforced a low **project-wide** rate limit (observed as
+a shared quota across the whole project, not per-recipient), surfaced as
+`error_code: over_email_send_rate_limit` (429) during Milestone 10 launch
+testing — magic link is the app's only authentication method (sec 9), so
+that bottleneck directly blocked account creation at any real scale.
 
-This is acceptable for a controlled, low-volume launch smoke test, but is
-**not sufficient for real signup volume** — magic-link sign-in is the only
-authentication method this app has (sec 9), so an email-sending bottleneck
-directly blocks account creation. Before broader launch, configure a real
-production SMTP provider (e.g. Resend, Postmark, SES) in the Supabase
-Dashboard (Authentication → Email → SMTP Settings) and verify the sending
-domain. Track this in `docs/TODO.md` until done — do not treat the current
-default sender as production-ready beyond initial testing.
+**Sending domain:** `auth.rankle.io` — a dedicated subdomain of the owned
+`rankle.io` domain (sec 25), not the apex domain and not the production app
+domain. A dedicated subdomain isolates sending reputation from anything else
+ever put on `rankle.io`, and its DNS records live entirely under
+`*.auth.rankle.io`, so verifying it never touched any pre-existing record on
+the apex zone. Verified in Resend via:
+
+| Record | Type | Name | Purpose |
+| --- | --- | --- | --- |
+| DKIM | TXT | `resend._domainkey.auth` | Signs outgoing mail |
+| SPF (MX) | MX | `send.auth` → `feedback-smtp.us-east-1.amazonses.com` (priority 10) | Bounce/return-path handling |
+| SPF (TXT) | TXT | `send.auth` → `v=spf1 include:amazonses.com ~all` | Authorizes Resend's sending infra |
+| DMARC (optional) | TXT | `_dmarc.auth` → `v=DMARC1; p=none;` | Monitoring-only anti-spoofing policy |
+
+All four records are managed in Vercel DNS (the registrar/DNS host for
+`rankle.io`) and are purely additive — the "Enable Receiving" inbound-mail
+option was deliberately left off, since this domain only ever sends.
+
+**Sender identity:** `Rankle <no-reply@auth.rankle.io>`.
+
+**Supabase SMTP configuration** (Dashboard → Authentication → Emails → SMTP
+Settings — never `supabase/config.toml`, which only affects the local CLI
+stack):
+
+- Host: `smtp.resend.com`
+- Port: `465`
+- Username: `resend`
+- Password: a Resend API key (see sec "Credential handling" below)
+- Sender name: `Rankle`
+- Sender email: `no-reply@auth.rankle.io`
+
+**Rate limit:** Supabase Authentication → Rate Limits → "Rate limit for
+sending emails" is set to **20/hour** (project-wide, not per-user). Chosen
+against the actual binding constraint — Resend's free-tier cap of 100
+emails/day — so a single bad hour (bug or abuse) can burn at most 1/5 of the
+day's entire quota before Supabase itself throttles further sends, while
+still comfortably covering realistic early-launch sign-in traffic. Revisit
+once real signup volume exists (`docs/TODO.md`).
+
+**Credential handling:** the Resend API key used as the SMTP password is
+entered directly into the Supabase Dashboard's SMTP Settings form and lives
+only there — it is not stored in this repository, not in `.env.example`,
+and not in Vercel's environment variables (Supabase Auth owns SMTP
+delivery entirely server-side; the application itself never sends email
+directly, so it has no reason to hold this credential). See
+`docs/SECURITY.md` sec 32 for the never-commit list and `docs/OPS.md` for
+rotation procedure.
+
+**Production verification (2026-09-14):** a real magic-link sign-in was
+performed end-to-end against production for both a non-admin account and
+the admin account — email delivered via Resend (confirmed "Delivered" in
+Resend's dashboard, landed in the primary inbox, not spam), PKCE callback
+exchange succeeded, `/profile` and `/admin` both worked correctly for the
+respective accounts, and signing out left protected routes protected. See
+`docs/OPS.md` for the ongoing verification/troubleshooting procedure.
 
 ---
 
@@ -548,7 +595,16 @@ When a custom domain is configured, record:
 Current domain configuration:
 
 ```text
-TBD
+rankle.io — owned, registered via Vercel (2026-09-14), DNS hosted on Vercel.
+  auth.rankle.io — dedicated Resend sending subdomain (see sec 23). Live.
+  Apex/www — NOT yet the production app domain. Production is still
+    https://rankle-theta.vercel.app; NEXT_PUBLIC_APP_URL, Supabase Auth's
+    Site URL, and the redirect URL allowlist are all still pinned there.
+    Vercel already lists rankle.io/www.rankle.io as aliases of the current
+    production deployment, but the app-level migration (env var, Supabase
+    redirect allowlist, OG metadata, old-URL redirect decision) has not
+    been done yet — see docs/TODO.md. Do not treat rankle.io as fully
+    migrated until that's complete.
 ```
 
 ---

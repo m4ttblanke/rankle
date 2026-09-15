@@ -246,34 +246,24 @@ provider decision (e.g. PostHog) and are explicitly not implemented yet:
 
 ## Operations
 
-- [ ] **Production email — replace Supabase's built-in Auth sender with
-  Resend (or other custom SMTP).** Rankle currently uses Supabase Auth's
+- [x] **Production email — replace Supabase's built-in Auth sender with
+  Resend custom SMTP (2026-09-14).** Rankle previously used Supabase Auth's
   default/built-in email sender for magic-link sign-in; during Milestone 10
   production testing this hit the built-in sender's project-wide rate limit
   (`error_code: over_email_send_rate_limit`) after a single test account's
-  sign-in. Magic link is the app's only auth method (`docs/DEPLOY.md` sec 9),
-  so this directly blocks sign-in at any real scale. The default sender
-  remains acceptable for controlled testing only — treat this as a
-  production-readiness item that must be completed before Rankle opens to
-  meaningful public signup volume. Covers:
-  - Create/configure a Resend account
-  - Set up a Rankle sending domain
-  - Configure the DNS records Resend requires for email authentication
-    (SPF/DKIM/etc.)
-  - Configure Resend SMTP credentials in Supabase Auth (Dashboard →
-    Authentication → Email → SMTP Settings)
-  - Use a branded sender, e.g. `Rankle <no-reply@...>`
-  - Verify production magic-link delivery end to end
-  - Verify the callback/PKCE authentication flow still works unchanged
-  - Review and reconfigure Supabase Auth's email rate limits once custom
-    SMTP is active (the current limits are sized for the default sender,
-    not a real provider)
-  - Test deliverability and spam-folder placement
-  - Keep SMTP/API credentials server-side only, never committed (same
-    discipline as `SUPABASE_SERVICE_ROLE_KEY`/`GUEST_COOKIE_SECRET` —
-    `docs/SECURITY.md` sec 32)
-  - Update `docs/DEPLOY.md` and `docs/OPS.md` with the setup, monitoring,
-    credential-rotation, and troubleshooting procedures once configured
+  sign-in. Now configured: `auth.rankle.io` (dedicated subdomain of the
+  newly-owned `rankle.io`) verified in Resend with DKIM/SPF/DMARC records in
+  Vercel DNS; Supabase Authentication → Emails → SMTP Settings points to
+  `smtp.resend.com`; sender identity is `Rankle <no-reply@auth.rankle.io>`;
+  Supabase's email rate limit set to 20/hour (sized against Resend's 100/day
+  free-tier cap, see `docs/DEPLOY.md` sec 23). Verified end to end in
+  production for both a non-admin and the admin account: Resend shows
+  Sent → Delivered, landed in the primary inbox (not spam), PKCE callback
+  exchange succeeded, `/profile` and `/admin` worked correctly, and signed-
+  out protected routes stayed protected. The Resend API key lives only in
+  Supabase's Dashboard, never in this repo or Vercel's environment
+  (`docs/SECURITY.md` sec 32). Full setup/troubleshooting procedure:
+  `docs/DEPLOY.md` sec 23, `docs/OPS.md` sec 27.
 - [ ] **Migrate production app to `rankle.io` as the canonical domain.**
   `rankle.io` is now owned (registered via Vercel, 2026-09-14; DNS zone
   already has `auth.rankle.io` configured for Resend — see the Resend/SMTP

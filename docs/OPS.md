@@ -334,6 +334,10 @@ Game should continue.
 
 ### Email down
 Email-dependent actions may fail clearly; core play should continue.
+Production magic-link email runs through Resend custom SMTP (`docs/DEPLOY.md`
+sec 23) — check Resend's dashboard (Emails/Logs, and Domains for the
+`auth.rankle.io` verification status) and Supabase Authentication Logs first;
+see sec 27's "Investigating a failed magic-link email" procedure.
 
 ### SMS down
 Invitation feature may fail; core sharing should continue.
@@ -565,6 +569,43 @@ show up within the same few seconds and can be cross-referenced by time.
 4. `app/auth/callback` only ever redirects to a fixed `/profile` or
    `/login?error=1` (`docs/SECURITY.md` sec 16) — if users land somewhere
    else, the bug is upstream (GoTrue config), not the callback route.
+5. If the failure looks email-specific rather than a redirect/callback
+   issue, see "Investigating a failed magic-link email (Resend)" below.
+
+### Investigating a failed magic-link email (Resend)
+
+Production custom SMTP is Resend (`docs/DEPLOY.md` sec 23,
+`auth.rankle.io`). Work through these in order:
+
+1. **Supabase Dashboard → Authentication → Logs** — filter to `/otp` (the
+   send) and `/verify`/`/token` (the click/exchange) around the reported
+   time. A `429 over_email_send_rate_limit` on `/otp` means either the
+   per-address ~60s resend cooldown (normal, not a bug) or the project-wide
+   20/hour limit (sec 23) was actually hit — the log's `error` message
+   distinguishes the two ("after N seconds" vs. a flat rate-limit message).
+2. **Resend Dashboard → Emails** — search by recipient address. Status
+   progresses `Sent → Delivered` normally; `Bounced`/`Complained` means the
+   recipient address itself is the problem (typo, full mailbox, etc.), not
+   the Rankle configuration. Open the message to confirm the `From` address
+   is exactly `Rankle <no-reply@auth.rankle.io>` — a different sender means
+   the Supabase SMTP Settings were changed or reverted.
+3. **Resend Dashboard → Domains → auth.rankle.io** — confirm status is
+   still `Verified` and the DKIM/SPF records under "Records" still show
+   `Verified`. A DNS record deleted or edited outside this procedure (e.g.
+   during unrelated `rankle.io` DNS work — sec 25) is the most likely way
+   this regresses; re-add the exact records from `docs/DEPLOY.md` sec 23 if
+   any show unverified.
+4. `GET /verify` returning a 303 with no subsequent `/token` call is a
+   distinct failure mode from a `bad_code_verifier` 400 — it means the
+   redirect back to `/auth/callback` never completed (or the callback never
+   ran the exchange), not that the code itself was invalid. Rule out a stale
+   already-signed-in session in the same browser before assuming a bug: a
+   leftover valid session from earlier testing can make a failed/incomplete
+   sign-in attempt look successful because the old session is still there.
+5. Deliverability landing in spam rather than failing outright: confirm SPF/
+   DKIM are `Verified` (step 3) — if both pass and it's still landing in
+   spam, this is a sender-reputation/content issue to escalate to Resend
+   support, not a configuration bug on Rankle's side.
 
 ### Rollback
 
@@ -601,7 +642,15 @@ sec 10 below.
 3. **`NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`** — this one is meant to be
    public; rotating it is only needed if RLS itself is believed compromised,
    not for ordinary exposure.
-4. After any rotation: update `.env.local` for local development, confirm the
+4. **Resend API key (Supabase SMTP password)** — Resend Dashboard →
+   **API keys** → revoke the compromised key → create a new one (Sending
+   access, scoped to `auth.rankle.io` if available) → paste the new value
+   into Supabase Dashboard → Authentication → Emails → SMTP Settings →
+   Save. No Vercel redeploy needed — this credential lives only in
+   Supabase's own config, never in the app's environment (`docs/DEPLOY.md`
+   sec 23). Confirm the old key no longer authenticates by checking Resend's
+   API keys list shows it revoked.
+5. After any rotation: update `.env.local` for local development, confirm the
    old value no longer works, and note what happened per sec 7.
 
 ### Launch-day smoke checks
