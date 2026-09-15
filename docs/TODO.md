@@ -120,20 +120,67 @@ Periodically clean up old completed items.
 
 ## Accounts
 
-- [ ] Reduce re-authentication friction after sign-out ("remember this
-  device" or similar). Observed 2026-09-14: every sign-in currently requires
-  a fresh magic-link email round-trip, including shortly after a recent
-  sign-out, which is real friction against the "Return tomorrow" core loop.
-  Needs a deliberate design pass, not a quick toggle — magic-link-only auth
-  (no passwords) means any "remember me" mechanism is itself a form of
-  session/trust extension and has to be reviewed against `docs/SECURITY.md`'s
-  auth invariants before implementation. Options to evaluate: simply confirm
-  Supabase's default refresh-token session length is long-lived and the
-  friction is actually about explicit sign-out (which is supposed to fully
-  end the session) vs. unexpected early expiry; a scoped "trusted device"
-  cookie that shortens (not skips) re-verification within a short window;
-  or extending session/refresh-token lifetime itself. Do not weaken the
-  email-verification guarantee without deciding this deliberately.
+- [x] **Session-persistence audit (2026-09-14) — no bug found, no code
+  change needed.** The 2026-09-14 "reduce re-authentication friction after
+  sign-out" item above was investigated end to end
+  (`lib/supabase/client.ts`/`server.ts`/`middleware.ts`, `proxy.ts`,
+  `app/actions/sign-in.ts`/`sign-out.ts`, `app/auth/callback/route.ts`) and
+  disproven: Rankle uses the standard `@supabase/ssr` cookie-session pattern
+  with no overrides anywhere, so the Supabase auth cookie already carries
+  that library's default 400-day `Max-Age` (verified directly in
+  `node_modules/@supabase/ssr`'s `DEFAULT_COOKIE_OPTIONS`, and confirmed live
+  against the local stack) — it is a genuinely persistent cookie, not a
+  browser-session-scoped one. `proxy.ts`'s `updateSession` runs
+  `supabase.auth.getUser()` on every request, which transparently refreshes
+  an expired access token via the still-valid refresh token and rewrites the
+  cookie; nothing in the app shortens session or refresh-token lifetime.
+  `signOut()` (`app/actions/sign-out.ts`) uses `supabase.auth.signOut()`'s
+  default `scope: 'global'`, which revokes the refresh token server-side —
+  confirmed by e2e: replaying a pre-sign-out cookie in a fresh browser
+  context after sign-out is rejected, not merely locally cleared.
+  New coverage added: `e2e/session-persistence.spec.ts` (cookie-lifetime
+  assertion, reload, new-tab, a fresh-context/`storageState` replay as the
+  closest available proxy for a real browser restart, and the sign-out
+  revocation check). Conclusion: normal sessions already persist across
+  refresh, new tabs, and browser restarts, and are expected to persist across
+  multi-day return visits too, for as long as Supabase's refresh token stays
+  unrevoked; explicit sign-out intentionally requires a fresh magic link
+  because it deliberately revokes that refresh token. No "remember this
+  device" / trusted-device mechanism is justified — it would only weaken an
+  invariant that isn't actually broken. Two things remain outside repo/tooling
+  inspection and were not changed: the production Supabase Dashboard's
+  Authentication → Sessions settings (a "time-box user sessions" or
+  inactivity-timeout value, if ever turned on there, would shorten this
+  independently of any app code) and real multi-day wall-clock behavior
+  (Playwright cannot fast-forward a calendar day; the cookie-lifetime and
+  refresh-on-request evidence above is the basis for expecting it to work,
+  not a literal day-later observation).
+  - **Reopened and reproduced-for (2026-09-14, same day):** the user
+    reported hitting exactly this on real production (`rankle.io`) — signed
+    in, did not sign out, closed the tab, reopened `rankle.io` in a new tab,
+    landed signed out. This was investigated live against real production
+    (real Chrome, real magic-link sign-in, real cookies inspected via the
+    Cookie Store API — metadata only, values never read/printed): the
+    `sb-*-auth-token` cookie was confirmed persistent (`expires` ~400 days
+    out), host-scoped to `rankle.io`, and correctly sent/accepted on
+    reopen. Four independent close-tab → new-tab → fresh-navigate cycles
+    against production all stayed authenticated. Also checked and ruled
+    out: stale cookies from the pre-`rankle.io` `rankle-theta.vercel.app`
+    domain (address bar confirmed `rankle.io` throughout, and the old host's
+    redirect to `rankle.io` doesn't disturb an existing session), and the
+    two production Supabase Dashboard session settings named above
+    (Time-box user sessions = 0/disabled, Inactivity timeout = 0/disabled,
+    no single-session restriction — user-confirmed directly in the
+    Dashboard). No cookie-clearing browser setting/extension was identified
+    either. Could not reproduce after this point; the user separately
+    confirmed normal sign-in-persists-after-tab-close behavior on their end
+    afterward. Treated as a one-time/transient event (e.g. a momentary
+    Supabase Auth or edge blip), not a standing defect — no code or
+    configuration change was made. If this recurs, the useful next data
+    points are: the exact time of the failure (to cross-reference Supabase
+    Auth logs for that window) and whether DevTools Application → Cookies
+    shows the auth cookie present-but-rejected vs. simply absent at the
+    moment of failure.
 - [x] Configure chosen Supabase Auth providers (email magic link only; local
   `supabase/config.toml` `[auth]` site_url/redirect URLs — production TBD
   until a domain exists, see `docs/DEPLOY.md` sec 9-10)
