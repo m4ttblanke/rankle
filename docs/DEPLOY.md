@@ -345,13 +345,15 @@ the full history. Current state:
   (`NEXT_PUBLIC_APP_URL` → `lib/env.ts` → `app/actions/sign-in.ts`'s
   `emailRedirectTo` and `components/share/share-button.tsx`'s share URL — the
   only two call sites in the codebase that build an absolute production URL).
-- **`www.rankle.io`:** redirects to the apex. No separate content is ever
-  served there.
+- **`www.rankle.io`:** redirects to the apex via Vercel's own domain-level
+  redirect (Project Settings → Domains — *not* an app-level rule; see sec 25
+  for why the two can't coexist). No separate content is ever served there.
 - **`rankle-theta.vercel.app`:** kept live as a compatibility redirect to the
-  apex (same mechanism as `www`, see sec 25) so links shared before the
-  migration keep working. It is not removed from the Vercel domain
-  attachment or the Supabase Auth redirect allowlist as part of this
-  migration — see sec 25 for the removal decision.
+  apex, via an app-level `next.config.ts` rule since Vercel has no
+  domain-level redirect for its own auto-issued alias (sec 25). Not removed
+  from the Vercel domain attachment or the Supabase Auth redirect allowlist
+  as part of this migration — see `docs/OPS.md` sec 27 for the removal
+  decision.
 - Both redirects preserve path and query string (`/archive` → `/archive`,
   `/?share=X` → `/?share=X`).
 
@@ -662,20 +664,34 @@ rankle.io — owned, registered via Vercel (2026-09-14), DNS hosted on Vercel.
     `rankle` Vercel project as a Production domain (`vercel domains inspect
     rankle.io`); NEXT_PUBLIC_APP_URL, Supabase Auth's Site URL, and the
     app's own absolute-URL construction (sec 14) all point here.
-  www.rankle.io — attached to the same project, redirects to the apex via
-    `next.config.ts` `redirects()` (host-matched, not a Vercel dashboard
-    domain redirect — see below for why).
+  www.rankle.io — attached to the same project, configured as a Vercel
+    domain-level redirect ("Redirect to Another Domain", 308) to rankle.io.
+    Set via the Vercel Dashboard (Project Settings → Domains), NOT an
+    app-level `next.config.ts` rule. This matters: this project previously
+    had it backwards (rankle.io domain-level redirecting TO www.rankle.io,
+    a leftover from when the domain was first added), which is invisible to
+    `vercel domains inspect`/`vercel alias ls` — the only way it surfaced
+    was an actual `curl -I` against the live host during the 2026-09-14
+    migration. Adding an app-level `www → apex` rule on top of that
+    unnoticed domain-level `apex → www` redirect produced a live infinite
+    redirect loop on both hosts (`docs/TODO.md`, `docs/OPS.md` sec 27) until
+    the Vercel-level direction was corrected. Do not add a `www.rankle.io`
+    rule to `next.config.ts` — Vercel already owns this redirect.
   rankle-theta.vercel.app — Vercel's auto-issued production alias for this
     project, not a domain this account owns (doesn't appear in `vercel
     domains ls`). Vercel provides no dashboard/CLI mechanism to redirect a
     project's own auto-issued `*.vercel.app` alias to a different domain, so
-    this is redirected to the apex the same way as www: a host-matched rule
-    in `next.config.ts`, executed at Vercel's edge before the app runs.
-    Kept live (as a redirect, not removed/detached) so links shared before
-    the 2026-09-14 cutover keep working — see `docs/TODO.md` for the
-    migration history and `docs/OPS.md` sec 27 for the removal/rollback
-    decision.
+    this one IS redirected at the application level: a host-matched rule in
+    `next.config.ts`, executed at Vercel's edge before the app runs. Kept
+    live (as a redirect, not removed/detached) so links shared before the
+    2026-09-14 cutover keep working — see `docs/TODO.md` for the migration
+    history and `docs/OPS.md` sec 27 for the removal/rollback decision.
 ```
+
+Before changing either domain's redirect configuration again, always verify
+the *actual* live behavior with `curl -I https://<host>/` first — Vercel's
+CLI domain-inspection commands do not reveal a domain's redirect target or
+direction, only that it's attached to the project.
 
 ---
 

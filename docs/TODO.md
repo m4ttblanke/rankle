@@ -276,11 +276,10 @@ provider decision (e.g. PostHog) and are explicitly not implemented yet:
 
   Completed:
   - `next.config.ts`: host-matched `redirects()` sends
-    `rankle-theta.vercel.app/*` and `www.rankle.io/*` to `https://rankle.io/*`,
-    preserving path and query string (no Vercel dashboard-level redirect
-    exists for a project's own auto-issued `*.vercel.app` alias, so this had
-    to be framework-level; see `docs/DEPLOY.md` sec 25). Covered by
-    `e2e/domain-redirect.spec.ts`.
+    `rankle-theta.vercel.app/*` to `https://rankle.io/*`, preserving path and
+    query string (no Vercel dashboard-level redirect exists for a project's
+    own auto-issued `*.vercel.app` alias, so this had to be framework-level;
+    see `docs/DEPLOY.md` sec 25). Covered by `e2e/domain-redirect.spec.ts`.
   - `NEXT_PUBLIC_APP_URL` set to `https://rankle.io` for Production only;
     Preview deliberately left at `https://rankle-theta.vercel.app`
     unchanged (`docs/DEPLOY.md` sec 13) rather than redesigned as part of
@@ -292,6 +291,24 @@ provider decision (e.g. PostHog) and are explicitly not implemented yet:
     `docs/DEPLOY.md` sec 10).
   - No OpenGraph/canonical metadata existed to update — `app/layout.tsx` has
     no `metadataBase` and no route sets its own OpenGraph metadata.
+  - Deployed to production (commits `3d119d1`, `82c392b`) via push to
+    `main` → Vercel's git integration.
+  - **Incident, found and fixed during rollout:** the first deploy also
+    added an app-level `www.rankle.io → rankle.io` rule in `next.config.ts`,
+    not realizing Vercel already had a domain-level redirect going the
+    *other* direction (`rankle.io → www.rankle.io`, a leftover from how the
+    domain was originally added — invisible to `vercel domains inspect`,
+    only surfaced via a direct `curl -I` against the live host). The two
+    together produced a live infinite redirect loop, making both hosts
+    unreachable for a few minutes. Fixed by removing the app-level `www`
+    rule (commit `82c392b`) and correcting the Vercel-level redirect
+    direction (dashboard) so `rankle.io` serves directly and `www.rankle.io`
+    redirects to it, 308, single hop. Full detail and the general lesson
+    (always `curl -I` a domain before adding a redirect for it) in
+    `docs/OPS.md` sec 27.
+  - Live-verified post-fix: `rankle.io` serves directly (200); `www.rankle.io`
+    and `rankle-theta.vercel.app` each redirect to `rankle.io` in exactly one
+    hop with path/query preserved; no loops; no 5xx.
   - Full local regression re-verified with no regressions: SQL/RLS 272/272,
     Vitest 438/438 (deterministic, `--no-file-parallelism`), Playwright
     91/91 (87 pre-existing + 4 new redirect tests; one pre-existing
@@ -299,15 +316,10 @@ provider decision (e.g. PostHog) and are explicitly not implemented yet:
     unrelated to this change, passes in isolation).
 
   Remaining before this can be checked off:
-  - Production deployment of the above (blocked pending explicit
-    confirmation — this is a hard-to-reverse production action; see
-    conversation for status)
-  - Post-deploy verification: confirm the live deployment actually shipped
-    with the new `NEXT_PUBLIC_APP_URL` (`docs/OPS.md` sec 27), anonymous
-    smoke test, protected-route check, a real magic-link/PKCE sign-in on
-    `rankle.io` with the existing admin account, old-share-link compatibility,
-    spoiler-gate regression, and a DB row-count comparison against the
-    pre-migration baseline
+  - Post-deploy application verification: a real magic-link/PKCE sign-in on
+    `rankle.io` with the existing admin account, `/profile`/`/admin`/`/friends`
+    checks, old-share-link compatibility and spoiler-gate regression, and a
+    DB row-count comparison against the pre-migration baseline
   - Decide later (not now) whether to remove the
     `rankle-theta.vercel.app/**` Supabase redirect-allowlist entry once the
     cutover has been stable (`docs/OPS.md` sec 27)

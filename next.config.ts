@@ -17,18 +17,14 @@ const nextConfig: NextConfig = {
     ],
   },
 
-  // rankle.io is canonical (docs/DEPLOY.md sec 25). Vercel has no domain-level
-  // redirect for its own auto-issued `rankle-theta.vercel.app` alias, so that
-  // host redirects here at the framework level — preserves path/query
+  // rankle.io is canonical (docs/DEPLOY.md sec 25). www.rankle.io -> rankle.io
+  // is handled by Vercel's own domain-level redirect (Project Settings ->
+  // Domains), not here — do not duplicate it with an app-level rule, that
+  // combination caused a live redirect loop in production on 2026-09-14
+  // (docs/TODO.md). Vercel has no equivalent domain-level redirect for its
+  // own auto-issued `rankle-theta.vercel.app` alias, so that one redirects
+  // here at the framework level instead — preserves path/query
   // automatically, never matches the apex itself so it can't loop.
-  //
-  // NOTE: www.rankle.io is deliberately NOT redirected here. Vercel already
-  // has an existing *domain-level* redirect sending the apex (rankle.io) to
-  // www.rankle.io — discovered live in production on 2026-09-14 (it doesn't
-  // surface in `vercel domains inspect`). Adding an app-level www->apex rule
-  // on top of that created an infinite redirect loop between the two hosts.
-  // Until that Vercel domain-level redirect is reconfigured (flipped to
-  // apex-primary) or removed, do not add a www rule here — see docs/TODO.md.
   async redirects() {
     return [
       {

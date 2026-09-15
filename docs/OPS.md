@@ -583,23 +583,47 @@ somewhere unexpected:
    the Projects section should list `rankle` with `rankle.io, www.rankle.io`.
    `curl -sI https://rankle.io` should return `200` with a valid cert (no TLS
    warning); if it doesn't, this is a Vercel domain issue, not application
-   code.
+   code. **`vercel domains inspect`/`vercel alias ls` do not show redirect
+   direction or target** — they only confirm attachment. The only reliable
+   way to see what a domain actually does is `curl -I` against it directly.
 2. **Confirm `NEXT_PUBLIC_APP_URL` actually shipped.** This is a build-time
    value — changing it in Vercel's dashboard does nothing to an
    already-built deployment (sec 27 "Verifying `NEXT_PUBLIC_APP_URL` after
    deployment" below). Check the live page source/share link/magic-link
    destination, not just the dashboard's env var value.
-3. **Old-hostname redirect not firing?** `rankle-theta.vercel.app` and
-   `www.rankle.io` redirect to `rankle.io` via a host-matched rule in
-   `next.config.ts` (`redirects()`), not a Vercel dashboard domain redirect —
-   Vercel has no domain-level redirect for its own auto-issued
-   `<project>.vercel.app` alias, so this had to be framework-level. If the
-   redirect stops working, check that rule still exists in `next.config.ts`
-   and that the deployed build actually includes it (same build-time caveat
-   as above — redirects compiled into the build, not live-editable).
-4. **Do not touch `auth.rankle.io` while debugging apex/www routing.** It is
+3. **`www.rankle.io` not redirecting correctly?** This is a Vercel
+   **domain-level** redirect (Project Settings → Domains → `www.rankle.io` →
+   "Redirect to Another Domain" → `rankle.io`, 308) — not application code,
+   nothing to check in `next.config.ts`. During the 2026-09-14 migration this
+   was found configured backwards (apex redirecting to `www` instead of the
+   reverse), which caused a live infinite redirect loop once an app-level
+   `www → apex` rule was added on top of it — see the incident note below.
+   **Never add a `www.rankle.io` rule to `next.config.ts`**; Vercel already
+   owns this redirect, and duplicating it at the app level is exactly what
+   caused the loop.
+4. **`rankle-theta.vercel.app` redirect not firing?** This one *is*
+   application-level — a host-matched rule in `next.config.ts`
+   (`redirects()`) — because Vercel has no domain-level redirect mechanism
+   for its own auto-issued `<project>.vercel.app` alias. If it stops
+   working, check that rule still exists in `next.config.ts` and that the
+   deployed build actually includes it (same build-time caveat as above —
+   redirects are compiled into the build, not live-editable).
+5. **Do not touch `auth.rankle.io` while debugging apex/www routing.** It is
    a separate DNS subdomain used only for Resend sending (`docs/DEPLOY.md`
    sec 23) and shares nothing with the app-serving DNS records.
+
+**Incident (2026-09-14):** during the initial cutover, an app-level
+`next.config.ts` rule redirecting `www.rankle.io → rankle.io` was deployed
+without realizing Vercel already had an existing domain-level redirect going
+the *other* direction (`rankle.io → www.rankle.io`, a leftover from how the
+domain was originally added — invisible to `vercel domains inspect`).
+Together they formed `rankle.io → www.rankle.io → rankle.io → …`, an
+infinite loop making the entire site unreachable on both hosts for several
+minutes. Fixed by (a) removing the app-level `www` rule, then (b) correcting
+the Vercel domain-level redirect direction so `rankle.io` serves directly and
+`www.rankle.io` redirects to it. Lesson: **always `curl -I` a domain's actual
+live behavior before adding any redirect for it** — CLI/dashboard domain
+*attachment* views don't show redirect configuration.
 
 #### Verifying `NEXT_PUBLIC_APP_URL` after deployment
 
@@ -635,16 +659,21 @@ configuration — do not improvise:
    `http://localhost:3000/**` are both still present — they should be, since
    the migration only ever *added* `https://rankle.io/**` rather than
    removing anything.
-3. **`next.config.ts` redirects**: leave them in place. They only redirect
-   `rankle-theta.vercel.app` and `www.rankle.io` traffic *to* `rankle.io`; if
-   `rankle.io` itself is the thing that's broken, revert or comment out the
-   `redirects()` block too so `rankle-theta.vercel.app` keeps serving the app
-   directly instead of bouncing users to a broken domain.
-4. **Vercel domain attachment**: do not detach `rankle.io`/`www.rankle.io`
+3. **`next.config.ts` redirects**: leave the `rankle-theta.vercel.app → rankle.io`
+   rule in place; if `rankle.io` itself is the thing that's broken, revert or
+   comment out the `redirects()` block too so `rankle-theta.vercel.app` keeps
+   serving the app directly instead of bouncing users to a broken domain.
+   This file has no `www.rankle.io` rule (see the incident note above) — no
+   app-level change is needed for `www`.
+4. **Vercel domain-level `www.rankle.io` redirect**: leave it pointed at
+   `rankle.io` — it doesn't need to change for an app rollback. Only revisit
+   it if `rankle.io` itself is what's being rolled back away from, in which
+   case point it at whatever host is being restored to instead.
+5. **Vercel domain attachment**: do not detach `rankle.io`/`www.rankle.io`
    from the project as part of rollback — they can keep pointing at the same
-   deployment; the app-level config above is what actually controls user-
-   facing behavior.
-5. Redeploy, then re-run the sec 26 auth/gameplay verification against
+   deployment; the config above is what actually controls user-facing
+   behavior.
+6. Redeploy, then re-run the sec 26 auth/gameplay verification against
    `https://rankle-theta.vercel.app` before declaring rollback complete.
 
 ### Investigating a failed magic-link email (Resend)
