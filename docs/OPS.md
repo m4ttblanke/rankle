@@ -329,6 +329,14 @@ Examples:
 ### Analytics down
 Game should continue.
 
+**As built (Product Analytics milestone):** verified directly —
+`lib/analytics/log.ts` swallows every failure mode (a rejected insert, a
+thrown error constructing the service-role client, `after()` itself
+throwing) after a server-only log line, and never throws or rejects to its
+caller. Gameplay, submission, and sharing do not await or depend on it
+succeeding (`lib/analytics/log.test.ts`,
+`app/actions/submit-ranking.test.ts`).
+
 ### Monitoring down
 Game should continue.
 
@@ -772,6 +780,47 @@ submission, sharing, or admin:
    UI ever flashes.
 7. Check Vercel logs and Supabase logs (above) for unexpected errors during
    this pass.
+
+### Verifying product analytics (Product Analytics milestone)
+
+Events land in `public.analytics_events` — a first-party table, no
+third-party dashboard to check. Query it directly (Supabase SQL editor, or
+`psql "$SUPABASE_DB_URL"` against the linked remote project):
+
+```sql
+-- Recent events, most recent first
+select event_name, occurred_at, tierlist_id, user_id, guest_id, share_id, properties
+from public.analytics_events
+order by occurred_at desc
+limit 50;
+
+-- Funnel counts for a given day's tierlist
+select event_name, count(*)
+from public.analytics_events
+where tierlist_id = '<tierlist-id>'
+group by event_name;
+
+-- Completion-time percentiles (ranking_started -> ranking_submitted)
+select
+  percentile_cont(0.5) within group (order by (properties->>'duration_ms')::numeric) as p50_ms,
+  percentile_cont(0.75) within group (order by (properties->>'duration_ms')::numeric) as p75_ms
+from public.analytics_events
+where event_name = 'ranking_submitted' and properties ? 'duration_ms';
+```
+
+If a deploy that should be logging events shows none: confirm the deployment
+is actually Production (`lib/analytics/log.ts` is a deliberate no-op unless
+`VERCEL_ENV === "production"` — a Preview deployment or local dev never
+writes, and never will merely because `next build` marks the bundle
+`NODE_ENV=production` too; `VERCEL_ENV` is the value that actually
+distinguishes Production from Preview), then check Vercel function logs for
+`[analytics] ...` lines (every
+failure mode is logged server-side, never thrown — sec 3's "prefer IDs and
+redacted context" applies here too, no ranking/share/PII content in these
+lines). A missing/rotated `SUPABASE_SERVICE_ROLE_KEY` is the most likely
+root cause of a silent, total analytics outage — see sec 21 for rotation.
+Analytics failing this way never affects gameplay, submission, or sharing —
+those paths do not depend on the analytics write succeeding.
 
 ---
 

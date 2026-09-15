@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { NoGameToday } from "@/components/game/empty-state";
 import { RankingBoard } from "@/components/game/ranking-board";
 import { AppHeader } from "@/components/layout/app-header";
+import { logAnalyticsEvent } from "@/lib/analytics/log";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { getDailyGame } from "@/lib/game/get-daily-game";
 import { getFriendPlayedStatus } from "@/lib/game/friends";
@@ -73,17 +74,36 @@ export default async function HomePage({ searchParams }: Props) {
   const { share: shareParam } = await searchParams;
   const shareToken = await resolveShareContinuation(shareParam, game?.slug);
 
+  const guestId = await getGuestId();
+
   if (game) {
-    const alreadySubmitted = await hasSubmittedRanking(
-      game.id,
-      await getGuestId(),
-    );
+    const alreadySubmitted = await hasSubmittedRanking(game.id, guestId);
     if (alreadySubmitted) {
       redirect(shareToken ? `/share/${shareToken}` : "/results");
     }
   }
 
   const user = await getCurrentUser();
+
+  // `daily_game_viewed` (Product Analytics milestone, docs/TODO.md): fires
+  // only for the population that actually reaches the interactive board
+  // below — a real current game, and an identity that has NOT already
+  // submitted (the branch above already redirected those visitors away
+  // before this line). Logged server-side, once per request — no client
+  // round trip needed.
+  if (game) {
+    await logAnalyticsEvent({
+      eventName: "daily_game_viewed",
+      tierlistId: game.id,
+      userId: user?.id ?? null,
+      guestId: user ? null : guestId,
+      properties: {
+        authenticated: Boolean(user),
+        entry_source: shareToken ? "share" : "direct",
+        item_count: game.items.length,
+      },
+    });
+  }
 
   // Spoiler-safe, pre-submission friend activity count (docs/MANUAL.md sec
   // 17: "5 friends played today" — a count only, never who or what they

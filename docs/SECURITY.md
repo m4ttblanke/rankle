@@ -674,6 +674,73 @@ Avoid:
 - Auth tokens
 - Full ranking payloads unless truly necessary
 
+**As built (Product Analytics milestone, docs/TODO.md):** Rankle's product
+analytics is a first-party table, `public.analytics_events`, not a
+third-party vendor — there is no external service to send data to at all.
+Six event names only (`daily_game_viewed`, `ranking_started`,
+`ranking_completed`, `ranking_submitted`, `share_opened`,
+`share_recipient_submitted`); every insert goes through the one shared
+writer, `lib/analytics/log.ts`.
+
+The table has **no grant to `anon`/`authenticated` at all** — same shape as
+`shares`/`friend_requests` (sec 6, sec 8) — RLS is defense in depth, the
+absent grants already deny both roles outright (verified in
+`supabase/tests/rls_spec.sql`'s "analytics_events" section, mirroring the
+privilege-catalog checks sec 4's admin RPCs already use). The only writer is
+the service-role client, called only from trusted server-only code (Server
+Actions/Components that have already resolved identity the same way
+`submit_ranking`/`create_share` do) — the same precedent as
+`claim_guest_submissions` (sec 26): a table reachable only via a server-only
+trusted path, never via PostgREST.
+
+Identity columns (`user_id`/`guest_id`) never mint anything new — they store
+exactly the identifiers `submissions.user_id`/`submissions.guest_id` already
+carry. `logEvent()`'s guest-identity read (`app/actions/log-event.ts`) is
+`getGuestId()` (read-only), never `ensureGuestId()` — starting to rank never
+mints a guest cookie; that stays tied to an actual submission (sec 26,
+unchanged). A first-time-ever anonymous visitor therefore has no identity at
+`daily_game_viewed`/`ranking_started`/`ranking_completed`/`share_opened`
+time — this is intentional, not a bug: no substitute tracking identity
+(session id, fingerprint, etc.) was introduced to paper over that gap. The
+practical effect on metric definitions is documented in
+`docs/MANUAL.md` sec 30.
+
+`share_id` stored on `share_opened`/`share_recipient_submitted` is the
+internal `shares.id` uuid, resolved server-side inside
+`logAnalyticsEvent()` — the public, guessable share **token** itself is
+never persisted anywhere in `analytics_events` (verified directly in
+`lib/analytics/log.test.ts`). No ranking contents, tier placements, emails,
+usernames, display names, phone numbers, auth tokens, or the guest cookie's
+raw value are ever passed as a property to any event — see the exact
+property list per event in `docs/MANUAL.md` sec 30.
+
+Writes happen via Next's `after()` (`lib/analytics/log.ts`), scheduled after
+the response is already sent, and are a deliberate no-op outside
+`VERCEL_ENV === "production"` — deliberately not `NODE_ENV`, which is
+`"production"` on every Vercel deployment including Preview (`next build`
+always produces a production build); `VERCEL_ENV` is Vercel's own system
+variable that actually distinguishes Production from Preview. Local
+development, the test suite, and Preview deployments all have `VERCEL_ENV`
+unset or `"preview"` and never write real rows. Every failure mode (a
+rejected insert, a thrown error from
+the service-role client, `after()` itself throwing outside a request scope)
+is swallowed after a server-only log line — analytics can never turn a
+successful submission/share/page view into a failed one, and can never block
+gameplay, submission, sharing, or auth (`lib/analytics/log.test.ts`,
+`app/actions/submit-ranking.test.ts`'s "analytics" describe block).
+
+`share_recipient_submitted` attribution is re-validated server-side
+(`isShareForTierlist`, `lib/game/get-share.ts`) against the exact tierlist
+being submitted before it can attribute anything — a client cannot forge
+attribution by handing the submit action an arbitrary/foreign
+`shareToken` (`app/actions/submit-ranking.test.ts`).
+
+No third-party analytics provider (PostHog or otherwise) is in use. If one
+is adopted later, apply this same discipline: minimal event vocabulary,
+identity that reuses what already exists rather than mints new tracking,
+disabled autocapture/session-replay/heatmaps by default, and a security
+review before enabling it.
+
 ---
 
 ## 24. Friend Privacy

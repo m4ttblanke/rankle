@@ -11,6 +11,14 @@ import { RankingBoard } from "./ranking-board";
 const submitRanking = vi.hoisted(() => vi.fn());
 vi.mock("@/app/actions/submit-ranking", () => ({ submitRanking }));
 
+// The client-loggable analytics boundary (Product Analytics milestone,
+// docs/TODO.md) — mocked so `ranking_started`/`ranking_completed` firing
+// semantics can be asserted directly without touching the real Server
+// Action (which reaches cookies()/Supabase, well outside this component's
+// own concerns).
+const logEvent = vi.hoisted(() => vi.fn());
+vi.mock("@/app/actions/log-event", () => ({ logEvent }));
+
 const routerReplace = vi.hoisted(() => vi.fn());
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: routerReplace }),
@@ -19,6 +27,7 @@ vi.mock("next/navigation", () => ({
 afterEach(() => {
   cleanup();
   submitRanking.mockReset();
+  logEvent.mockReset();
   routerReplace.mockReset();
 });
 
@@ -212,6 +221,10 @@ describe("<RankingBoard> N/A tier (haven't tried, distinct from Unranked)", () =
         { item_id: "item-0", tier: "S", position: 0 },
         { item_id: "item-1", tier: "N/A", position: 0 },
       ],
+      // `ranking_started` fired on the first move above, so a real elapsed
+      // duration is timed by the time this submit fires (Product Analytics
+      // milestone, docs/TODO.md).
+      clientDurationMs: expect.any(Number),
     });
   });
 });
@@ -267,6 +280,123 @@ describe("<RankingBoard> completion", () => {
   });
 });
 
+describe("<RankingBoard> analytics (Product Analytics milestone, docs/TODO.md)", () => {
+  it("does not log anything before the player touches a card", () => {
+    render(<RankingBoard game={makeGame()} />);
+    expect(logEvent).not.toHaveBeenCalled();
+  });
+
+  it("ranking_started fires exactly once, on the first move", async () => {
+    const user = userEvent.setup();
+    render(<RankingBoard game={makeGame(["S", "A"], ["a", "b", "c"])} />);
+
+    await user.click(card("a"));
+    await user.click(pickerBtn(/^tier S$/i));
+    await waitFor(() =>
+      expect(logEvent).toHaveBeenCalledWith({
+        eventName: "ranking_started",
+        tierlistId: "11111111-1111-4111-8111-111111111111",
+        entrySource: "direct",
+      }),
+    );
+    expect(
+      logEvent.mock.calls.filter((c) => c[0]?.eventName === "ranking_started"),
+    ).toHaveLength(1);
+
+    // Further moves never refire it.
+    await user.click(card("b"));
+    await user.click(pickerBtn(/^tier S$/i));
+    expect(
+      logEvent.mock.calls.filter((c) => c[0]?.eventName === "ranking_started"),
+    ).toHaveLength(1);
+  });
+
+  it("ranking_completed fires once, on the first incomplete -> complete transition, and never refires when items move afterward", async () => {
+    const user = userEvent.setup();
+    render(<RankingBoard game={makeGame(["S", "A"], ["a", "b", "c"])} />);
+    for (const label of ["a", "b", "c"]) {
+      await user.click(card(label));
+      await user.click(pickerBtn(/^tier S$/i));
+    }
+    await waitFor(() =>
+      expect(
+        logEvent.mock.calls.filter((c) => c[0]?.eventName === "ranking_completed"),
+      ).toHaveLength(1),
+    );
+    expect(logEvent).toHaveBeenCalledWith({
+      eventName: "ranking_completed",
+      tierlistId: "11111111-1111-4111-8111-111111111111",
+      entrySource: "direct",
+      itemCount: 3,
+    });
+
+    // Reordering an already-placed item, still fully ranked, must not refire.
+    await user.click(card("a"));
+    await user.click(pickerBtn(/^tier A$/i));
+    expect(
+      logEvent.mock.calls.filter((c) => c[0]?.eventName === "ranking_completed"),
+    ).toHaveLength(1);
+  });
+
+  it("ranking an item into N/A counts toward completion for analytics too", async () => {
+    const user = userEvent.setup();
+    render(<RankingBoard game={makeGame(["S", "N/A"], ["a", "b"])} />);
+    await user.click(card("a"));
+    await user.click(pickerBtn(/^tier S$/i));
+    expect(
+      logEvent.mock.calls.filter((c) => c[0]?.eventName === "ranking_completed"),
+    ).toHaveLength(0);
+
+    await user.click(card("b"));
+    await user.click(pickerBtn(/^tier N\/A$/i));
+    await waitFor(() =>
+      expect(
+        logEvent.mock.calls.filter((c) => c[0]?.eventName === "ranking_completed"),
+      ).toHaveLength(1),
+    );
+  });
+
+  it("pulling the last item back out of a tier, then re-completing, does not refire ranking_completed a second time", async () => {
+    const user = userEvent.setup();
+    render(<RankingBoard game={makeGame(["S", "A"], ["a", "b"])} />);
+    for (const label of ["a", "b"]) {
+      await user.click(card(label));
+      await user.click(pickerBtn(/^tier S$/i));
+    }
+    await waitFor(() =>
+      expect(
+        logEvent.mock.calls.filter((c) => c[0]?.eventName === "ranking_completed"),
+      ).toHaveLength(1),
+    );
+
+    await user.click(card("a"));
+    await user.click(pickerBtn(/^unranked$/i));
+    await user.click(card("a"));
+    await user.click(pickerBtn(/^tier S$/i));
+
+    expect(
+      logEvent.mock.calls.filter((c) => c[0]?.eventName === "ranking_completed"),
+    ).toHaveLength(1);
+  });
+
+  it("entrySource reflects a share continuation", async () => {
+    const user = userEvent.setup();
+    render(
+      <RankingBoard
+        game={makeGame(["S", "A"], ["a", "b", "c"])}
+        shareToken="abcdef0123456789abcdef0123456789"
+      />,
+    );
+    await user.click(card("a"));
+    await user.click(pickerBtn(/^tier S$/i));
+    await waitFor(() =>
+      expect(logEvent).toHaveBeenCalledWith(
+        expect.objectContaining({ entrySource: "share" }),
+      ),
+    );
+  });
+});
+
 describe("<RankingBoard> submission and results handoff (Milestone 4)", () => {
   it("confirm -> lock it in -> replaces the URL with /results; board stays frozen", async () => {
     submitRanking.mockResolvedValue({ ok: true });
@@ -295,6 +425,7 @@ describe("<RankingBoard> submission and results handoff (Milestone 4)", () => {
         { item_id: "item-1", tier: "S", position: 1 },
         { item_id: "item-2", tier: "S", position: 2 },
       ],
+      clientDurationMs: expect.any(Number),
     });
   });
 

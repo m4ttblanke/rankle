@@ -15,6 +15,7 @@ import {
 } from "@dnd-kit/core";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { logEvent } from "@/app/actions/log-event";
 import {
   UNRANKED,
   createInitialRanking,
@@ -106,6 +107,17 @@ export function RankingBoard({
   const focusItemId = useRef<string | null>(null);
   const reduceMotion = usePrefersReducedMotion();
 
+  // Product Analytics milestone (docs/TODO.md): `ranking_started` fires once,
+  // on the first item movement out of Unranked; `ranking_completed` fires
+  // once, on the first incomplete -> complete transition (see the effect
+  // below). Both refs are mount-scoped guards so neither can ever refire in
+  // this session — moving already-placed items around after completion, or
+  // any later re-render, never re-triggers either event.
+  const hasFiredStarted = useRef(false);
+  const hasFiredCompleted = useRef(false);
+  const rankingStartedAt = useRef<number | null>(null);
+  const entrySource = shareToken ? "share" : "direct";
+
   // Once the ranking is officially immutable, the editable board is no longer
   // a meaningful history entry — `replace` (not `push`) so back-navigation
   // can't return the player to a stale pre-submit board. A validated share
@@ -125,6 +137,32 @@ export function RankingBoard({
   const total = game.items.length;
   const complete = total > 0 && remaining === 0;
   const untouched = remaining === total;
+
+  // `ranking_started`: the first (and only) transition away from "every item
+  // still in Unranked" this mount ever sees.
+  useEffect(() => {
+    if (untouched || hasFiredStarted.current) return;
+    hasFiredStarted.current = true;
+    rankingStartedAt.current = Date.now();
+    void logEvent({
+      eventName: "ranking_started",
+      tierlistId: game.id,
+      entrySource,
+    });
+  }, [untouched, game.id, entrySource]);
+
+  // `ranking_completed`: the first (and only) incomplete -> complete
+  // transition this mount ever sees.
+  useEffect(() => {
+    if (!complete || hasFiredCompleted.current) return;
+    hasFiredCompleted.current = true;
+    void logEvent({
+      eventName: "ranking_completed",
+      tierlistId: game.id,
+      entrySource,
+      itemCount: total,
+    });
+  }, [complete, game.id, entrySource, total]);
 
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
@@ -331,6 +369,8 @@ export function RankingBoard({
             state={state}
             complete={complete}
             remaining={remaining}
+            shareToken={shareToken}
+            rankingStartedAtRef={rankingStartedAt}
             onSubmitting={setBoardFrozen}
             onSubmitted={goToResults}
           />

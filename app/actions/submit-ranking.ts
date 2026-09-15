@@ -1,6 +1,9 @@
 "use server";
 
+import { clampDurationMs } from "@/lib/analytics/events";
+import { logAnalyticsEvent } from "@/lib/analytics/log";
 import { ensureGuestId } from "@/lib/game/guest";
+import { isShareForTierlist } from "@/lib/game/get-share";
 import {
   submitRankingInputSchema,
   type SubmitRankingResult,
@@ -38,16 +41,19 @@ export async function submitRanking(
   if (!parsed.success) {
     return { ok: false, reason: "invalid" };
   }
-  const { tierlistId, items } = parsed.data;
+  const { tierlistId, items, shareToken, clientDurationMs } = parsed.data;
 
   const supabase = await createClient();
 
   let guestId: string | null = null;
+  let userId: string | null = null;
   try {
     const {
       data: { user },
     } = await supabase.auth.getUser();
-    if (!user) {
+    if (user) {
+      userId = user.id;
+    } else {
       guestId = await ensureGuestId();
     }
   } catch (err) {
@@ -62,7 +68,16 @@ export async function submitRanking(
       p_guest_id: guestId ?? undefined,
     });
 
-    if (!error) return { ok: true };
+    if (!error) {
+      await logSubmissionEvents({
+        tierlistId,
+        userId,
+        guestId,
+        shareToken,
+        clientDurationMs,
+      });
+      return { ok: true };
+    }
 
     const reason = mapRpcError(error.code);
     // Server-side only: code + message + game id. Never the ranking payload or
@@ -74,6 +89,66 @@ export async function submitRanking(
   } catch (err) {
     console.error("[submit-ranking] unexpected failure", err);
     return { ok: false, reason: "network" };
+  }
+}
+
+/**
+ * Log `ranking_submitted` (always, on a fresh success — never on the
+ * `"already"` duplicate branch, which the caller never reaches this
+ * function for) and, when a validated share continuation is present,
+ * `share_recipient_submitted` (Product Analytics milestone, docs/TODO.md).
+ *
+ * `shareToken` is only ever an analytics attribution input here — it never
+ * affects what gets submitted (that already happened, above). It is
+ * re-validated exactly once, via `isShareForTierlist`, against this exact
+ * `tierlistId` — and that single result drives BOTH `share_recipient_submitted`
+ * and `ranking_submitted`'s own `entry_source` property. `submitRanking` is a
+ * Server Action, callable directly with arbitrary well-shaped input, not only
+ * through the UI (the same threat model `items`/`tierlistId` are already
+ * validated against) — an unvalidated `shareToken` string alone must never be
+ * enough to mark a submission `entry_source: "share"`; that would mislabel
+ * the funnel without a matching `share_recipient_submitted`, the same kind of
+ * forgery the attribution event itself already guards against. Never throws:
+ * analytics must not be able to turn a successful submission into a failed
+ * one.
+ */
+async function logSubmissionEvents(args: {
+  tierlistId: string;
+  userId: string | null;
+  guestId: string | null;
+  shareToken: string | undefined;
+  clientDurationMs: number | undefined;
+}): Promise<void> {
+  try {
+    const { tierlistId, userId, guestId, shareToken, clientDurationMs } = args;
+    const durationMs = clampDurationMs(clientDurationMs);
+    const validShare = Boolean(
+      shareToken && (await isShareForTierlist(shareToken, tierlistId)),
+    );
+
+    await logAnalyticsEvent({
+      eventName: "ranking_submitted",
+      tierlistId,
+      userId,
+      guestId,
+      properties: {
+        authenticated: userId !== null,
+        entry_source: validShare ? "share" : "direct",
+        ...(durationMs !== null ? { duration_ms: durationMs } : {}),
+      },
+    });
+
+    if (validShare) {
+      await logAnalyticsEvent({
+        eventName: "share_recipient_submitted",
+        tierlistId,
+        userId,
+        guestId,
+        shareToken,
+      });
+    }
+  } catch (err) {
+    console.error("[submit-ranking] analytics logging failed", err);
   }
 }
 

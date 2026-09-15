@@ -5,6 +5,7 @@ export type Json =
   | null
   | { [key: string]: Json | undefined }
   | Json[]
+
 export type Database = {
   graphql_public: {
     Tables: {
@@ -33,6 +34,61 @@ export type Database = {
   }
   public: {
     Tables: {
+      analytics_events: {
+        Row: {
+          event_name: string
+          guest_id: string | null
+          id: number
+          occurred_at: string
+          properties: Json
+          share_id: string | null
+          tierlist_id: string | null
+          user_id: string | null
+        }
+        Insert: {
+          event_name: string
+          guest_id?: string | null
+          id?: never
+          occurred_at?: string
+          properties?: Json
+          share_id?: string | null
+          tierlist_id?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          event_name?: string
+          guest_id?: string | null
+          id?: never
+          occurred_at?: string
+          properties?: Json
+          share_id?: string | null
+          tierlist_id?: string | null
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "analytics_events_share_id_fkey"
+            columns: ["share_id"]
+            isOneToOne: false
+            referencedRelation: "shares"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "analytics_events_tierlist_id_fkey"
+            columns: ["tierlist_id"]
+            isOneToOne: false
+            referencedRelation: "tierlists"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "analytics_events_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       claimed_guest_submissions: {
         Row: {
           claimed_at: string
@@ -478,6 +534,7 @@ export type Database = {
         Returns: Json
       }
       get_friend_results: { Args: { p_tierlist_id: string }; Returns: Json }
+      get_next_release_date: { Args: never; Returns: string }
       get_results: {
         Args: { p_guest_id?: string; p_tierlist_id: string }
         Returns: Json
@@ -486,7 +543,6 @@ export type Database = {
         Args: { p_guest_id?: string; p_token: string }
         Returns: Json
       }
-      get_next_release_date: { Args: never; Returns: string | null }
       has_submitted_ranking: {
         Args: { p_guest_id?: string; p_tierlist_id: string }
         Returns: boolean
@@ -570,8 +626,11 @@ export type Database = {
     }
   }
 }
+
 type DatabaseWithoutInternals = Omit<Database, "__InternalSupabase">
+
 type DefaultSchema = DatabaseWithoutInternals[Extract<keyof Database, "public">]
+
 export type Tables<
   DefaultSchemaTableNameOrOptions extends
     | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
@@ -600,6 +659,7 @@ export type Tables<
       ? R
       : never
     : never
+
 export type TablesInsert<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
@@ -624,6 +684,7 @@ export type TablesInsert<
       ? I
       : never
     : never
+
 export type TablesUpdate<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
@@ -648,6 +709,7 @@ export type TablesUpdate<
       ? U
       : never
     : never
+
 export type Enums<
   DefaultSchemaEnumNameOrOptions extends
     | keyof DefaultSchema["Enums"]
@@ -664,6 +726,7 @@ export type Enums<
   : DefaultSchemaEnumNameOrOptions extends keyof DefaultSchema["Enums"]
     ? DefaultSchema["Enums"][DefaultSchemaEnumNameOrOptions]
     : never
+
 export type CompositeTypes<
   PublicCompositeTypeNameOrOptions extends
     | keyof DefaultSchema["CompositeTypes"]
@@ -680,6 +743,7 @@ export type CompositeTypes<
   : PublicCompositeTypeNameOrOptions extends keyof DefaultSchema["CompositeTypes"]
     ? DefaultSchema["CompositeTypes"][PublicCompositeTypeNameOrOptions]
     : never
+
 export const Constants = {
   graphql_public: {
     Enums: {},
@@ -688,3 +752,4 @@ export const Constants = {
     Enums: {},
   },
 } as const
+

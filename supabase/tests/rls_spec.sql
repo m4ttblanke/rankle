@@ -1872,6 +1872,51 @@ end;
 $$;
 
 -- =====================================================================
+-- Product Analytics milestone: analytics_events has NO client grant at all
+-- (same shape as shares/friend_requests — RLS is defense in depth, the
+-- absent grants already deny anon/authenticated outright). Only the
+-- service-role client (lib/analytics/log.ts) ever touches this table.
+-- =====================================================================
+do $$
+begin
+  perform pg_temp.rec(
+    'analytics_events: RLS is enabled',
+    exists (
+      select 1 from pg_class c
+      join pg_namespace n on n.oid = c.relnamespace
+      where n.nspname = 'public' and c.relname = 'analytics_events'
+        and c.relrowsecurity
+    )
+  );
+  perform pg_temp.rec(
+    'privilege catalog: anon has NO grant at all on analytics_events',
+    not exists (
+      select 1 from information_schema.role_table_grants
+      where table_schema = 'public' and table_name = 'analytics_events'
+        and grantee = 'anon'
+    )
+  );
+  perform pg_temp.rec(
+    'privilege catalog: authenticated has NO grant at all on analytics_events',
+    not exists (
+      select 1 from information_schema.role_table_grants
+      where table_schema = 'public' and table_name = 'analytics_events'
+        and grantee = 'authenticated'
+    )
+  );
+  perform pg_temp.rec(
+    'anon cannot read analytics_events via PostgREST-equivalent role',
+    pg_temp.run_as('anon', null, 'select * from public.analytics_events') = '42501'
+  );
+  perform pg_temp.rec(
+    'authenticated cannot read analytics_events either',
+    pg_temp.run_as('authenticated', 'bbbbbbbb-0000-0000-0000-000000000002',
+      'select * from public.analytics_events') = '42501'
+  );
+end;
+$$;
+
+-- =====================================================================
 -- results
 -- =====================================================================
 select id, status, name, detail from _t order by id;

@@ -41,6 +41,27 @@ export async function getShare(
 }
 
 /**
+ * Confirm that `token` is a real, non-revoked share representing exactly
+ * `tierlistId` (Product Analytics milestone, docs/TODO.md). Used only to
+ * attribute `share_recipient_submitted` — it is NOT an eligibility check
+ * (deliberately calls `getShare(token, null)`, the same "what game does this
+ * represent" pattern as `app/page.tsx`'s `resolveShareContinuation`, never
+ * asking whether this identity is unlocked) and it never influences what
+ * gets submitted. A token that fails this (wrong game, unknown, revoked,
+ * malformed) cannot be used to credit an unrelated share — attribution can't
+ * be forged by handing the submit action an arbitrary query parameter.
+ */
+export async function isShareForTierlist(
+  token: string,
+  tierlistId: string,
+): Promise<boolean> {
+  const share = await getShare(token, null);
+  if (!share) return false;
+  const shareTierlistId = await getTierlistIdBySlug(share.tierlistSlug);
+  return shareTierlistId === tierlistId;
+}
+
+/**
  * Resolve a tierlist's id from its slug, under the same public-read RLS
  * policy `getDailyGame()` relies on (`tierlists_select_public_or_admin` /
  * `is_tierlist_public` — live, scheduled, or archived). Used to look up the

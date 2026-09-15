@@ -521,15 +521,48 @@ This is deliberately basic traffic analytics, not a product-analytics
 system — it collects only anonymous page views/navigation, nothing
 Rankle-specific (no user IDs, emails, ranking contents, friend data, or
 share tokens are ever passed to it; the component takes no such props).
-Product-level metrics (daily players, completion rate, share conversion,
-etc.) are tracked as a separate future item — see `docs/TODO.md`.
 
-If PostHog or another product-analytics provider is enabled later:
+**Product analytics (as built, Product Analytics milestone):** a first-party
+Postgres table (`public.analytics_events`,
+`supabase/migrations/20260914080000_analytics_events.sql`), not PostHog or
+any other third-party vendor — see `docs/TODO.md` for the provider
+evaluation and `docs/MANUAL.md` sec 30 for the exact event/metric
+definitions, and `docs/SECURITY.md` sec 23 for the privacy/security
+treatment.
+
+**No new environment variables were needed.** The feature reuses
+`SUPABASE_SERVICE_ROLE_KEY` (already documented in `.env.example`) as its
+only credential — `lib/analytics/log.ts` writes through the same
+service-role client `lib/game/claim-guest-submissions.ts` already uses, for
+the same reason: the table has no grant to `anon`/`authenticated` at all.
+There is no public client analytics key, because there is no client-side
+analytics SDK — every event is logged from trusted server code (a Server
+Action or Server Component), never a browser script.
+
+Writes are gated on `VERCEL_ENV === "production"` inside `lib/analytics/log.ts`
+itself — deliberately not `NODE_ENV`, which is `"production"` for every
+Vercel deployment including Preview (`next build` always produces a
+production build; `VERCEL_ENV` is the system variable that actually
+distinguishes Production from Preview). Local development and every test
+run (`npm run test`, `npm run test:e2e`) are automatically a no-op, since
+`VERCEL_ENV` is unset there — no separate local/development configuration is
+required, and nothing needs disabling in local dev. No third-party service
+to inspect: query
+`public.analytics_events` directly (Supabase SQL editor / `psql`) for the
+first dashboard/report, e.g. funnel counts via `group by event_name` and
+completion-time percentiles via `percentile_cont(0.5)`/`percentile_cont(0.75)`
+on `(properties->>'duration_ms')::numeric`. Remember the table has no client
+grants at all — this is a server-side/admin-only query surface, never
+something the app's own client code reads.
+
+If a third-party product-analytics provider (PostHog or otherwise) is
+adopted later instead of or alongside this table:
 
 - Configure client key appropriately
 - Do not expose private server secrets
 - Disable or separate analytics in local development if noisy
 - Avoid sending PII
+- Disable autocapture/session-replay/heatmaps by default
 
 Document exact variables once enabled.
 

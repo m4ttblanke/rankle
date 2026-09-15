@@ -878,6 +878,94 @@ Analytics should answer actual product questions.
 
 Avoid unnecessary PII.
 
+**As built (Product Analytics milestone):** separate from Vercel Web
+Analytics (`docs/DEPLOY.md` sec 21, anonymous page-view/traffic only).
+Product analytics is a first-party table, `public.analytics_events` — not
+PostHog or another third-party vendor (see `docs/TODO.md`'s Product
+Analytics writeup for the full provider evaluation). Instrument the smallest
+set of events that answers a real funnel/timing question the database can't
+already answer more accurately; do not duplicate a fact Postgres already
+tracks.
+
+Facts already accurate from existing tables, with no event needed:
+
+- **Shares created** — `shares` (one row per submission, `created_at`).
+- **Account conversion (guest -> registered)** — `claimed_guest_submissions`.
+- **Daily players** (the strongest definition: successful unique
+  submitters) — `submissions`, one row per official submission.
+- **Return rate** — whether an identity with a submission on game *N* also
+  has one on a later released game, computed directly from `submissions` +
+  `tierlists.release_date`.
+
+Six events cover everything the database genuinely can't see —
+whether a visit ever became a start/completion/submission, and whether a
+share link ever got opened or converted:
+
+| Event | Fires | Client/Server | Properties |
+|---|---|---|---|
+| `daily_game_viewed` | The board actually renders for a not-yet-submitted identity (already-submitted visitors are redirected before this, by `app/page.tsx`) | Server (`app/page.tsx`) | `tierlist_id`, `authenticated`, `entry_source` (`direct`/`share`), `item_count` |
+| `ranking_started` | First movement of any item out of Unranked, once per page session | Client, via `app/actions/log-event.ts` (`components/game/ranking-board.tsx`) | `tierlist_id`, `authenticated`, `entry_source` |
+| `ranking_completed` | First transition from incomplete to fully ranked (N/A counts as an intentional, completed placement); moving already-placed items afterward never refires it | Client, via `app/actions/log-event.ts` | `tierlist_id`, `authenticated`, `entry_source`, `item_count` |
+| `ranking_submitted` | A fresh official submission succeeds — never on the duplicate/"already submitted" branch, since the database already counted that submission once | Server (`app/actions/submit-ranking.ts`) | `tierlist_id`, `authenticated`, `entry_source`, `duration_ms` (client-timed start -> submit, discarded rather than clamped if implausible — see below) |
+| `share_opened` | A valid, non-revoked share link is loaded (any of: locked+current, locked+wrapped-up, unlocked) — never for the generic invalid-link state | Server (`app/share/[token]/page.tsx`) | `tierlist_id`, `share_state` (`locked_current`/`locked_wrapped`/`unlocked`) |
+| `share_recipient_submitted` | A fresh submission whose `?share=` continuation is re-validated server-side against the exact tierlist being submitted (`isShareForTierlist`) — a client cannot forge attribution with an arbitrary token | Server (`app/actions/submit-ranking.ts`) | `tierlist_id` |
+
+Every event's `user_id`/`guest_id` reuses the same identifiers
+`submissions` already stores — nothing new is minted. A first-time-ever
+anonymous visitor has no identity yet (a guest cookie is only minted at
+first submission, unchanged product behavior) — this is a known,
+deliberate gap, not a workaround. See `docs/SECURITY.md` sec 23 for the full
+privacy/security treatment.
+
+**Exact metric definitions** (fix these here so they can't silently drift —
+docs/TODO.md's own instruction):
+
+- **Daily players** = unique successful submitters for the day's tierlist
+  (`submissions`). Distinct from viewers/starters/completers below —
+  never used interchangeably.
+- **Ranking start rate** = unique `ranking_started` / unique
+  `daily_game_viewed`, for a given tierlist. For visitors with no persisted
+  identity (a first-time anonymous guest, pre-cookie), "unique" is
+  necessarily a raw event count, not a person count — an honest, not a
+  fabricated, number.
+- **Ranking completion rate** = unique `ranking_completed` / unique
+  `ranking_started`.
+- **Submission rate** = unique submitters (`submissions`) / unique
+  `ranking_started`; also reported against `daily_game_viewed`.
+- **Share rate** = shares created (`shares`) / unique submitters.
+- **Share -> open rate** = `share_opened` event count / shares created.
+- **Share -> play conversion** = unique `share_recipient_submitted` /
+  `share_opened` event count, for the same tierlist. This is deliberately
+  an **open-event-based** rate, not a claimed unique-recipient rate: a
+  first-time recipient (the interesting acquisition case) has no identity
+  at open time, so opens can't be deduplicated per person without minting a
+  new tracking cookie, which this milestone does not do. Where identity
+  *is* already available (an authenticated visitor, or a guest with a
+  cookie from an earlier day's play), `share_opened` still records it, so a
+  secondary, genuinely unique conversion rate can be computed for that
+  subset — but the headline number is the open-based rate, and it is never
+  reported as "unique recipients." The sender re-opening their own link is
+  never miscounted as a converted recipient: they're already eligible the
+  moment they open it, so they never re-enter the ranking flow and
+  `share_recipient_submitted` structurally can't fire for them.
+- **Return rate** = computed from `submissions` alone (see above) — no
+  event involved.
+- **Account conversion** = computed from `claimed_guest_submissions`/
+  `profiles` alone — no event involved.
+- **Average completion time** = `ranking_submitted.duration_ms`
+  (`ranking_started` -> successful submit, client-timed), reported as
+  **median (p50) and p75**, not a raw mean. A value outside a plausible
+  range (a tab left open for hours, a multi-day gap) is discarded (`null`)
+  rather than clamped, so it can't distort the distribution.
+- **New vs. returning** — reliably computable only from `submissions` (an
+  identity with a prior submission vs. not), i.e. only for identities that
+  already have one: authenticated users, or a guest with an existing
+  cookie. **Not reliably measurable pre-submission for a brand-new
+  anonymous visitor** — deliberately not solved by minting an early
+  tracking identity (`docs/SECURITY.md` sec 26's "no invasive
+  fingerprinting"). Treat this as a known gap, not a metric to report as if
+  it covered every visitor.
+
 ---
 
 ## 31. Data Model

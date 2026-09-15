@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { shareTokenSchema } from "./share-schema";
 
 /**
  * Trust-boundary schema + result types for official submission (Milestone 3).
@@ -30,11 +31,22 @@ export const submissionItemSchema = z
   .strict();
 
 /** What the client is allowed to send to the submit Server Action. The guest
- *  identity is NOT part of this — it comes only from the signed cookie. */
+ *  identity is NOT part of this — it comes only from the signed cookie.
+ *
+ *  `shareToken` and `clientDurationMs` are analytics-only inputs (Product
+ *  Analytics milestone, docs/TODO.md): the token is re-validated server-side
+ *  against this exact tierlist before it can attribute a
+ *  `share_recipient_submitted` event (`lib/game/get-share.ts`'s
+ *  `isShareForTierlist`) — it is never trusted to affect what gets
+ *  submitted. `clientDurationMs` is clamped (`lib/analytics/events.ts`'s
+ *  `clampDurationMs`) before it can influence anything — worst case a bogus
+ *  value is simply discarded (`null`), never a security concern. */
 export const submitRankingInputSchema = z
   .object({
     tierlistId: uuid,
     items: z.array(submissionItemSchema).min(1),
+    shareToken: shareTokenSchema.optional(),
+    clientDurationMs: z.number().optional(),
   })
   .strict();
 

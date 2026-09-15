@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition, type RefObject } from "react";
 import { submitRanking } from "@/app/actions/submit-ranking";
 import { toSubmissionPayload, type RankingState } from "@/lib/game/ranking";
 import type { DailyGame } from "@/lib/game/schema";
@@ -22,6 +22,17 @@ type Props = {
   state: RankingState;
   complete: boolean;
   remaining: number;
+  /** An already-validated share continuation token (Milestone 5), forwarded
+   *  as an analytics attribution input only — see
+   *  `app/actions/submit-ranking.ts`'s `logSubmissionEvents`. Never affects
+   *  what gets submitted. */
+  shareToken?: string | null;
+  /** Ref (not a value — read only inside the submit handler, never during
+   *  render) holding when `ranking_started` fired this session, for the
+   *  `duration_ms` analytics property (Product Analytics milestone,
+   *  docs/TODO.md); `null` if the board was already fully ranked before any
+   *  move was made in this session (nothing to time). */
+  rankingStartedAtRef?: RefObject<number | null>;
   /** Freeze the board while a submit is in flight. */
   onSubmitting: (submitting: boolean) => void;
   /** Called once the database confirms an official submission exists for this
@@ -42,6 +53,8 @@ export function SubmitBar({
   state,
   complete,
   remaining,
+  shareToken,
+  rankingStartedAtRef,
   onSubmitting,
   onSubmitted,
 }: Props) {
@@ -76,11 +89,16 @@ export function SubmitBar({
     onSubmitting(true);
 
     startTransition(async () => {
+      const startedAt = rankingStartedAtRef?.current;
       let result: Awaited<ReturnType<typeof submitRanking>>;
       try {
         result = await submitRanking({
           tierlistId: game.id,
           items: toSubmissionPayload(state, game),
+          ...(shareToken ? { shareToken } : {}),
+          ...(startedAt !== null && startedAt !== undefined
+            ? { clientDurationMs: Date.now() - startedAt }
+            : {}),
         });
       } catch {
         result = { ok: false, reason: "network" };

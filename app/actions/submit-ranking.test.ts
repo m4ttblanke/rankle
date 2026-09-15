@@ -16,6 +16,16 @@ const getUser = vi.fn();
 const createClient = vi.fn(async () => ({ rpc, auth: { getUser } }));
 vi.mock("@/lib/supabase/server", () => ({ createClient }));
 
+// Product Analytics milestone (docs/TODO.md): both collaborators for
+// `logSubmissionEvents` are mocked so the logging behavior itself — not the
+// real transport (`lib/analytics/log.ts` already has its own tests) — can be
+// asserted precisely.
+const logAnalyticsEvent = vi.fn();
+vi.mock("@/lib/analytics/log", () => ({ logAnalyticsEvent }));
+
+const isShareForTierlist = vi.fn();
+vi.mock("@/lib/game/get-share", () => ({ isShareForTierlist }));
+
 const { submitRanking } = await import("./submit-ranking");
 
 const GAME_ID = "11111111-1111-4111-8111-111111111111";
@@ -28,6 +38,8 @@ beforeEach(() => {
   ensureGuestId.mockResolvedValue(GUEST_ID);
   getUser.mockResolvedValue({ data: { user: null }, error: null });
   rpc.mockResolvedValue({ data: "submission-id", error: null });
+  logAnalyticsEvent.mockResolvedValue(undefined);
+  isShareForTierlist.mockResolvedValue(false);
 });
 
 function validInput(overrides: Record<string, unknown> = {}) {
@@ -159,5 +171,114 @@ describe("submitRanking — success and error mapping", () => {
     const result = await submitRanking(validInput());
     expect(result).toEqual({ ok: false, reason: "network" });
     expect(rpc).not.toHaveBeenCalled();
+  });
+});
+
+describe("submitRanking — analytics (Product Analytics milestone, docs/TODO.md)", () => {
+  it("logs ranking_submitted only on a fresh success", async () => {
+    await submitRanking(validInput());
+    expect(logAnalyticsEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventName: "ranking_submitted",
+        tierlistId: GAME_ID,
+        userId: null,
+        guestId: GUEST_ID,
+        properties: expect.objectContaining({
+          authenticated: false,
+          entry_source: "direct",
+        }),
+      }),
+    );
+  });
+
+  it("never logs ranking_submitted on the duplicate/'already' branch — the DB already counted that submission once", async () => {
+    rpc.mockResolvedValue({ data: null, error: { code: "23505" } });
+    const result = await submitRanking(validInput());
+    expect(result).toEqual({ ok: false, reason: "already" });
+    expect(logAnalyticsEvent).not.toHaveBeenCalled();
+  });
+
+  it("never logs on any other rejected submission", async () => {
+    rpc.mockResolvedValue({ data: null, error: { code: "23001" } });
+    await submitRanking(validInput());
+    expect(logAnalyticsEvent).not.toHaveBeenCalled();
+  });
+
+  it("marks authenticated: true and entry_source: share when a share token is present", async () => {
+    getUser.mockResolvedValue({ data: { user: { id: USER_ID } }, error: null });
+    isShareForTierlist.mockResolvedValue(true);
+    const SHARE_TOKEN = "abcdef0123456789abcdef0123456789";
+    await submitRanking(validInput({ shareToken: SHARE_TOKEN }));
+    expect(logAnalyticsEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventName: "ranking_submitted",
+        properties: expect.objectContaining({
+          authenticated: true,
+          entry_source: "share",
+        }),
+      }),
+    );
+  });
+
+  it("logs share_recipient_submitted only when the token is re-validated against THIS tierlist", async () => {
+    isShareForTierlist.mockResolvedValue(true);
+    const SHARE_TOKEN = "abcdef0123456789abcdef0123456789";
+    await submitRanking(validInput({ shareToken: SHARE_TOKEN }));
+    expect(isShareForTierlist).toHaveBeenCalledWith(SHARE_TOKEN, GAME_ID);
+    expect(logAnalyticsEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventName: "share_recipient_submitted",
+        tierlistId: GAME_ID,
+        shareToken: SHARE_TOKEN,
+      }),
+    );
+  });
+
+  it("attribution cannot be forged with an arbitrary/foreign token — a token for a different game logs no share_recipient_submitted", async () => {
+    isShareForTierlist.mockResolvedValue(false); // the token doesn't represent GAME_ID
+    const SHARE_TOKEN = "abcdef0123456789abcdef0123456789";
+    await submitRanking(validInput({ shareToken: SHARE_TOKEN }));
+    const eventNames = logAnalyticsEvent.mock.calls.map((c) => c[0]?.eventName);
+    expect(eventNames).not.toContain("share_recipient_submitted");
+    expect(eventNames).toContain("ranking_submitted"); // the submission itself still succeeds and is still logged
+  });
+
+  it("an unvalidated/foreign shareToken never mislabels entry_source as 'share' either — calling submitRanking directly with an arbitrary token can't skew the funnel without a matching share_recipient_submitted", async () => {
+    isShareForTierlist.mockResolvedValue(false);
+    const SHARE_TOKEN = "abcdef0123456789abcdef0123456789";
+    await submitRanking(validInput({ shareToken: SHARE_TOKEN }));
+    const submittedCall = logAnalyticsEvent.mock.calls.find(
+      (c) => c[0]?.eventName === "ranking_submitted",
+    );
+    expect(submittedCall?.[0].properties.entry_source).toBe("direct");
+  });
+
+  it("clamps an out-of-range clientDurationMs to absent rather than trusting it", async () => {
+    await submitRanking(validInput({ clientDurationMs: -5 }));
+    const call = logAnalyticsEvent.mock.calls.find(
+      (c) => c[0]?.eventName === "ranking_submitted",
+    );
+    expect(call?.[0].properties).not.toHaveProperty("duration_ms");
+  });
+
+  it("passes through a plausible clientDurationMs as duration_ms", async () => {
+    await submitRanking(validInput({ clientDurationMs: 45_000 }));
+    const call = logAnalyticsEvent.mock.calls.find(
+      (c) => c[0]?.eventName === "ranking_submitted",
+    );
+    expect(call?.[0].properties.duration_ms).toBe(45_000);
+  });
+
+  it("an analytics logging failure never turns a successful submission into a failure", async () => {
+    logAnalyticsEvent.mockRejectedValue(new Error("insert failed"));
+    const result = await submitRanking(validInput());
+    expect(result).toEqual({ ok: true });
+  });
+
+  it("an isShareForTierlist failure never turns a successful submission into a failure", async () => {
+    isShareForTierlist.mockRejectedValue(new Error("network blip"));
+    const SHARE_TOKEN = "abcdef0123456789abcdef0123456789";
+    const result = await submitRanking(validInput({ shareToken: SHARE_TOKEN }));
+    expect(result).toEqual({ ok: true });
   });
 });

@@ -216,20 +216,43 @@ Periodically clean up old completed items.
 ## Product Analytics
 
 Separate from Vercel Web Analytics (Milestone 10 — basic anonymous
-traffic/page-view analytics only, `docs/DEPLOY.md` sec 21). Product
-analytics means Rankle-specific behavioral metrics, which need their own
-provider decision (e.g. PostHog) and are explicitly not implemented yet:
+traffic/page-view analytics only, `docs/DEPLOY.md` sec 21).
 
-- [ ] Choose product-analytics provider
-- [ ] Daily players
-- [ ] Ranking completion rate
-- [ ] Submission rate
-- [ ] Share creation
-- [ ] Share → play conversion
-- [ ] New vs. returning players
-- [ ] Account conversion (guest → registered)
-- [ ] Average completion time
-- [ ] Avoid sending unnecessary PII (`docs/SECURITY.md` sec 23)
+- [x] Choose product-analytics provider — a first-party Postgres table
+  (`public.analytics_events`), not PostHog or another third-party vendor.
+  See "Product Analytics milestone" under Completed below for the full
+  evaluation and exact event/metric definitions
+  (`docs/MANUAL.md` sec 30, `docs/SECURITY.md` sec 23).
+- [x] Daily players — defined and retrievable: unique successful submitters
+  (`submissions`), no event needed.
+- [x] Ranking completion rate — retrievable: unique `ranking_completed` /
+  unique `ranking_started` (`analytics_events`).
+- [x] Submission rate — retrievable: unique submitters (`submissions`) /
+  unique `ranking_started`.
+- [x] Share creation — retrievable: `shares` (already existed; no event
+  needed — a duplicate event would only add noise).
+- [x] Share → play conversion — retrievable, but defined honestly as an
+  **open-event-based** rate (`share_recipient_submitted` / `share_opened`
+  event count), not a claimed unique-recipient rate — a first-time-ever
+  recipient has no persisted identity at open time, and this milestone
+  deliberately does not mint one just to make that number "unique." See
+  `docs/MANUAL.md` sec 30 for the exact reasoning.
+- [ ] New vs. returning players — only **partially** measurable: reliable
+  from `submissions` for identities that already have one (authenticated,
+  or a guest with an existing cookie); **not** reliably measurable
+  pre-submission for a brand-new anonymous visitor, and not solved by
+  minting an early tracking identity (`docs/SECURITY.md` sec 26). Left
+  unchecked deliberately — revisit only if a real product need justifies
+  weakening the no-early-tracking stance, which should not be done lightly.
+- [x] Account conversion (guest → registered) — retrievable:
+  `claimed_guest_submissions` (already existed).
+- [x] Average completion time — retrievable: `ranking_submitted.duration_ms`
+  (client-timed, implausible values discarded), reported as median/p75, not
+  a raw mean.
+- [x] Avoid sending unnecessary PII (`docs/SECURITY.md` sec 23) — no
+  ranking contents, share tokens, emails, usernames, display names, phone
+  numbers, auth tokens, or the guest cookie's raw value ever leave the
+  server or appear in any event property.
 
 ---
 
@@ -1084,3 +1107,154 @@ Follow-ups it surfaced (also tracked above, under Archive/PWA-Retention):
   this is covered at the unit level (`lib/game/streaks.test.ts`) only.
 - [ ] "Allow historical play" and "friend completion indicators for archive
   games" remain open, deliberately deferred (tracked under Archive above).
+
+## Product Analytics milestone (2026-09-14)
+
+**Provider decision:** a first-party Postgres table
+(`public.analytics_events`), not PostHog or any other third-party vendor.
+Evaluated PostHog, Vercel's existing analytics tooling, and a minimal
+first-party table against the actual questions this milestone needs
+answered (funnel drop-off, completion-time percentiles, share-loop
+conversion). PostHog would answer them too, but at the cost of a new
+vendor, a new client SDK (~30-50KB gzipped), and a new anonymous-id
+cookie/localStorage surface Rankle doesn't have today, to solve a scale
+problem Rankle doesn't have at current traffic. Vercel's existing analytics
+has no funnel/custom-event capability suited to these questions. A first-
+party table needed zero new infrastructure (Supabase Postgres is already
+the primary database), zero new cookies, and zero new vendor relationship
+— the boring option, per `CLAUDE.md`'s own simplicity ordering (reuse
+existing stack before adding a dependency). Revisit PostHog only if
+cohort/retention analysis genuinely outgrows hand-written SQL.
+
+**Audit finding that shaped the whole design:** most of the requested
+metrics were already answerable more accurately from existing tables
+(`submissions`, `shares`, `claimed_guest_submissions`) than any event could
+manage — duplicating them into events would only have added noise and a
+second, potentially-drifting source of truth. Only the pre-submission
+funnel (viewed/started/completed), completion timing, and the share-open
+step were genuinely invisible to the database (`get_share` is a pure read
+RPC; opening a share link left zero row anywhere before this milestone).
+The event vocabulary was built to cover exactly that gap and nothing else —
+six events, not the nine in the original candidate list (`share_created`
+and `account_created` dropped as pure DB-truth duplicates; `results_viewed`
+dropped for near-total overlap with `ranking_submitted`, since submit
+already redirects straight into a results/share view).
+
+**Identity, deliberately unambitious:** every event's `user_id`/`guest_id`
+reuses the exact identifiers `submissions` already stores — no new identity
+was minted for analytics. `app/actions/log-event.ts` reads the guest cookie
+read-only (`getGuestId()`, never `ensureGuestId()`) — starting to rank never
+mints a cookie; that stays tied to an actual submission, unchanged product
+behavior. The consequence, stated plainly rather than papered over: a
+first-time-ever anonymous visitor has no identity until their first
+submission, so "unique" counts for that population are, honestly, raw event
+counts. This surfaced explicitly during design review of the "share → play
+conversion" metric — the original draft called it a unique-recipient
+conversion rate before checking whether that was actually measurable
+without inventing a new tracking cookie. It isn't (a first-time recipient,
+the case that matters most for "does sharing acquire new players," has no
+identity at open time) — the metric is defined instead as an
+open-event-based rate (a conservative lower bound, since repeat opens by
+the same person inflate the denominator), and `share_opened` still records
+whatever identity happens to already exist (a returning guest, an
+authenticated user) so a secondary genuinely-unique rate can be computed
+for that subset without any new tracking mechanism. See `docs/MANUAL.md`
+sec 30 for the exact formula and every other metric definition.
+
+**Implementation:** one migration
+(`supabase/migrations/20260914080000_analytics_events.sql`) — the table has
+**no grant to `anon`/`authenticated` at all**, the same shape as
+`shares`/`friend_requests`, RLS enabled as defense in depth on top of that.
+`lib/analytics/log.ts` is the one writer, used by every call site — no
+direct `public.analytics_events` access anywhere else. Writes are scheduled
+via Next's `after()` so logging an event never adds latency to a page view,
+a submission, or a share load, and are a no-op outside
+`VERCEL_ENV === "production"` so local dev/tests and Vercel Preview
+deployments never write real rows — a review pass caught that gating on
+`NODE_ENV` alone (the original draft) would NOT have excluded Preview,
+since `next build` always produces a `NODE_ENV=production` bundle
+regardless of which Vercel environment serves it; `VERCEL_ENV` is the value
+that actually distinguishes them, and is what ships.
+`app/actions/log-event.ts` is the one client-reachable boundary, restricted
+by `logEventInputSchema`'s enum to exactly `ranking_started`/
+`ranking_completed` — every other event is server-authoritative, logged
+directly by the Server Action/Component that already confirmed the
+underlying fact, so a client cannot forge e.g. a fake `ranking_submitted`
+or `share_recipient_submitted`. `share_recipient_submitted` attribution
+(`isShareForTierlist`, `lib/game/get-share.ts`) re-validates the `?share=`
+continuation against the exact tierlist being submitted before it can
+attribute anything.
+
+`ranking_started`/`ranking_completed` fire from idempotent `useEffect`
+guards in `RankingBoard` (mirroring the existing move-announcement effect
+pattern already in that file) rather than from a render-time helper —
+`eslint-plugin-react-hooks`'s purity rules correctly rejected an earlier
+draft that called `Date.now()`/read a ref directly during render/JSX; both
+now happen only inside effects or the submit event handler.
+
+No new environment variables — reuses `SUPABASE_SERVICE_ROLE_KEY`
+(`lib/supabase/service-role.ts`, the same client `claim_guest_submissions`
+already uses, for the same "no anon/authenticated grant at all" reason).
+
+277 SQL/RLS assertions (up from 272 — 5 new `analytics_events` grant/RLS
+assertions, mirroring the M7/M8 privilege-catalog pattern; all prior
+assertions unchanged), 472 Vitest (up from 438 — new coverage for
+`lib/analytics/log.ts`, `app/actions/log-event.ts`, the analytics describe
+block in `app/actions/submit-ranking.test.ts`, and the analytics describe
+block in `components/game/ranking-board.test.tsx`, covering: no logging
+before the game/board exist, `ranking_started`/`ranking_completed` each
+fire exactly once and never refire (including N/A counting toward
+completion, and a pull-out-then-re-complete cycle), `ranking_submitted`
+never logs on the duplicate/"already" branch, `share_recipient_submitted`
+attribution can't be forged with a foreign token, `duration_ms` clamping,
+the token never persisted alongside `share_opened`, environment gating, and
+every failure mode resolving rather than throwing), 96 Playwright (all
+prior specs, unchanged and green — analytics writes are a no-op in the
+Playwright/dev environment by design, so no new specs were needed there).
+Lint, typecheck, and a production build are all clean; `/`, `/share/[token]`,
+and every other pre-existing dynamic route still render `ƒ`, unchanged.
+
+Follow-ups it surfaced:
+
+- [ ] New-vs-returning for anonymous pre-submission visitors remains
+  unsolved by design (tracked above under Product Analytics) — revisit only
+  with a real, justified product need, not speculatively.
+- [ ] No dashboard beyond raw SQL exists yet (`docs/OPS.md`'s "Verifying
+  product analytics" has the starter queries: funnel counts, completion-time
+  percentiles). An `/admin/analytics` page (already a listed-but-unbuilt
+  route, `docs/MANUAL.md` sec 26) reusing these same queries would be the
+  natural next step once there's enough real traffic to make one worth
+  building.
+- [ ] `analytics_events` has no data-retention/cleanup policy yet — fine at
+  current volume; revisit once real usage makes table growth worth
+  managing (`docs/SECURITY.md` sec 28).
+
+**Two issues found and fixed during a pre-deploy review pass, before the
+remote migration or any deploy happened — both caught before shipping:**
+
+1. **Environment gating used `NODE_ENV` instead of `VERCEL_ENV`.** The
+   original implementation gated writes on `NODE_ENV === "production"`.
+   That's wrong on Vercel specifically: `next build` always produces a
+   `NODE_ENV=production` bundle, and Vercel serves that same production
+   build for Preview deployments too — so the original gate would have let
+   every Preview deployment (every PR, every branch) write real rows into
+   production `analytics_events`. Fixed to `VERCEL_ENV === "production"`,
+   Vercel's own system variable for exactly this distinction (unset
+   locally/in tests, `"preview"` on Preview, `"production"` only on a real
+   Production deployment) — no new environment variable to configure, it's
+   automatic. Added a regression test in `lib/analytics/log.test.ts` that
+   sets `NODE_ENV=production` + `VERCEL_ENV=preview` and asserts no write,
+   specifically to catch a future reintroduction of this bug.
+2. **`ranking_submitted.entry_source` could be mislabeled `"share"` without
+   a matching `share_recipient_submitted`.** `submitRanking` is a Server
+   Action, callable directly with arbitrary well-shaped input, not only
+   through the UI. The original code set `entry_source: shareToken ?
+   "share" : "direct"` from mere presence of a token, while the
+   `share_recipient_submitted` attribution event separately (and correctly)
+   required `isShareForTierlist` to validate that token against the
+   tierlist. A caller supplying an arbitrary/foreign `shareToken` directly
+   to the action would get `ranking_submitted` tagged `entry_source:
+   "share"` with no corresponding attribution event — skewing the
+   submission-rate-by-source breakdown without a real share involved. Fixed
+   by computing `isShareForTierlist` once and using that single validated
+   result for both `entry_source` and the attribution decision.

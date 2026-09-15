@@ -4,6 +4,8 @@ import { ShareGate } from "@/components/share/share-gate";
 import { ShareReveal } from "@/components/share/share-reveal";
 import { ShareWrappedUp } from "@/components/share/share-wrapped-up";
 import { AppHeader } from "@/components/layout/app-header";
+import { logAnalyticsEvent } from "@/lib/analytics/log";
+import { getCurrentUser } from "@/lib/auth/current-user";
 import { getDailyGame } from "@/lib/game/get-daily-game";
 import { getGuestId } from "@/lib/game/guest";
 import { getResults } from "@/lib/game/get-results";
@@ -79,8 +81,38 @@ export default async function SharePage({ params }: Params) {
     );
   }
 
-  const todayGame = await getDailyGame();
+  const [todayGame, tierlistId, user] = await Promise.all([
+    getDailyGame(),
+    getTierlistIdBySlug(share.tierlistSlug),
+    getCurrentUser(),
+  ]);
   const isCurrentGame = todayGame?.slug === share.tierlistSlug;
+
+  // `share_opened` (Product Analytics milestone, docs/TODO.md): fires for
+  // every valid, non-revoked share load — never for the generic invalid-link
+  // state above, which isn't a real "open" of anyone's share. Identity is
+  // captured when one already exists (an authenticated caller, or a guest
+  // with a cookie from a prior day's play — `getGuestId()` above never mints
+  // one), so returning recipients contribute to a genuinely unique count;
+  // a first-time-ever anonymous recipient (the common case for a share link
+  // reaching someone new) has none, and is intentionally not given a
+  // substitute tracking identity — see the migration comment on
+  // `analytics_events` for why "share -> play conversion" is reported as an
+  // open-event-based rate, not a claimed unique-recipient rate.
+  await logAnalyticsEvent({
+    eventName: "share_opened",
+    tierlistId,
+    userId: user?.id ?? null,
+    guestId: user ? null : guestId,
+    shareToken: token,
+    properties: {
+      share_state: share.locked
+        ? isCurrentGame
+          ? "locked_current"
+          : "locked_wrapped"
+        : "unlocked",
+    },
+  });
 
   if (share.locked) {
     return (
@@ -95,7 +127,6 @@ export default async function SharePage({ params }: Params) {
     );
   }
 
-  const tierlistId = await getTierlistIdBySlug(share.tierlistSlug);
   const myResults = tierlistId ? await getResults(tierlistId, guestId) : null;
 
   // Defensive: `locked: false` means this identity is eligible, which means
