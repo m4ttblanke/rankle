@@ -264,7 +264,7 @@ provider decision (e.g. PostHog) and are explicitly not implemented yet:
   Supabase's Dashboard, never in this repo or Vercel's environment
   (`docs/SECURITY.md` sec 32). Full setup/troubleshooting procedure:
   `docs/DEPLOY.md` sec 23, `docs/OPS.md` sec 27.
-- [ ] **Migrate production app to `rankle.io` as the canonical domain.**
+- [x] **Migrate production app to `rankle.io` as the canonical domain.**
   Root cause found (2026-09-14): `rankle.io`/`www.rankle.io` were already
   correctly attached to the `rankle` Vercel project (both aliased to the
   same deployment as `rankle-theta.vercel.app`) — the reason navigation kept
@@ -315,11 +315,31 @@ provider decision (e.g. PostHog) and are explicitly not implemented yet:
     `accounts.spec.ts` test is flaky only under full-suite parallelism,
     unrelated to this change, passes in isolation).
 
-  Remaining before this can be checked off:
-  - Post-deploy application verification: a real magic-link/PKCE sign-in on
-    `rankle.io` with the existing admin account, `/profile`/`/admin`/`/friends`
-    checks, old-share-link compatibility and spoiler-gate regression, and a
-    DB row-count comparison against the pre-migration baseline
+  Post-deploy application verification, all passed:
+  - Real magic-link sign-in on `rankle.io` with the existing admin account
+    (Matt, @m4ttblanke): `/login` → email from `Rankle <no-reply@auth.rankle.io>`
+    → PKCE callback → landed on `rankle.io/profile`, no `rankle-theta.vercel.app`
+    or `localhost` anywhere in the flow. Supabase auth logs for the window:
+    `/otp` 200, `/verify` 303, `/token` 200 — zero 4xx/5xx.
+  - `/admin` (5 submissions, matches baseline) and `/friends` (1 friend,
+    matches baseline) both worked signed in; sign-out worked; `/admin`
+    correctly redirected to `/` once signed out again — no admin data
+    exposed to a signed-out request.
+  - Anonymous smoke test: `/`, `/archive`, `/login` all 200; `/profile`,
+    `/friends`, `/admin`, `/results` all correctly gate signed-out visitors
+    (soft-redirect, e.g. `/results` → `NEXT_REDIRECT;replace;/;307` with only
+    loading-skeleton markup in the payload — no ranking/tier data).
+  - DB row counts identical to the pre-migration baseline across all 10
+    tables + `auth.users` (see top of this section) — no unexpected
+    mutations from the migration or the live auth test.
+  - Vercel request logs for the test window: no 4xx/5xx.
+  - Old-share-link compatibility: not directly tested against a real
+    production token (skipped by request rather than creating a new share);
+    covered indirectly by `e2e/domain-redirect.spec.ts`'s fixture-token
+    redirect-preservation tests and the general `rankle-theta.vercel.app`
+    redirect verification above.
+
+  Remaining (deliberately not part of this migration):
   - Decide later (not now) whether to remove the
     `rankle-theta.vercel.app/**` Supabase redirect-allowlist entry once the
     cutover has been stable (`docs/OPS.md` sec 27)
