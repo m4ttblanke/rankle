@@ -125,71 +125,82 @@ test("full admin lifecycle: create, add items, schedule, duplicate-date rejected
 }) => {
   await signInAsAdmin(page);
 
-  // ---- create --------------------------------------------------------
-  await page.goto("/admin");
-  await expect(page.getByRole("heading", { name: "Admin" })).toBeVisible();
-  await page.getByRole("link", { name: /new rankle/i }).click();
-
   const slug = `e2e-admin-${randomUUID().slice(0, 8)}`;
-  await page.getByLabel("Title").fill("E2E Admin Test Game");
-  await page.getByLabel("Slug").fill(slug);
-  await page.getByRole("button", { name: /^create draft$/i }).click();
-
-  await expect(page.getByRole("heading", { level: 1, name: "E2E Admin Test Game" })).toBeVisible();
-  await expect(page.getByText(/^draft$/i)).toBeVisible();
-
-  // ---- add items -------------------------------------------------------
-  await page.getByRole("button", { name: /\+ add item/i }).click();
-  await page.getByRole("button", { name: /\+ add item/i }).click();
-  const labelInputs = page.getByPlaceholder("Item label");
-  await labelInputs.nth(0).fill("Alpha");
-  await labelInputs.nth(1).fill("Beta");
-  await page.getByRole("button", { name: /^save items$/i }).click();
-  await expect(page.getByText(/^saved$/i)).toBeVisible();
-
-  // preview reflects the saved items
-  await expect(page.getByRole("heading", { name: "Preview" })).toBeVisible();
-  await expect(page.getByText("Alpha")).toBeVisible();
-  await expect(page.getByText("Beta")).toBeVisible();
-
-  // ---- schedule ----------------------------------------------------------
-  const freeDate = futureDateString(randomOffset(15, 300));
-  await page.locator('input[type="date"]').fill(freeDate);
-  await page.getByRole("button", { name: /^schedule$/i }).click();
-  await expect(page.getByText(/^scheduled$/i)).toBeVisible();
-
-  // shows up in Upcoming on the dashboard
-  await page.goto("/admin");
-  await expect(
-    page.getByRole("link", { name: new RegExp(`E2E Admin Test Game.*/${slug}`, "s") }),
-  ).toBeVisible();
-
-  // ---- duplicate release date is rejected ---------------------------------
-  await page.goto("/admin/tierlists/new");
   const slug2 = `e2e-admin-${randomUUID().slice(0, 8)}`;
-  await page.getByLabel("Title").fill("E2E Admin Conflict Game");
-  await page.getByLabel("Slug").fill(slug2);
-  await page.getByRole("button", { name: /^create draft$/i }).click();
-  await page.locator('input[type="date"]').fill(freeDate);
-  await page.getByRole("button", { name: /^schedule$/i }).click();
-  await expect(page.getByText(/already scheduled for that date/i)).toBeVisible();
+  // Both slugs' rows are cleaned up below regardless of outcome: the second
+  // ends this test still scheduled at a random future date (see
+  // `randomOffset`), and a leftover row permanently consumes one of that
+  // range's dates — repeated local runs without an intervening
+  // `supabase db reset` eventually collide on `tierlists_release_date_key`
+  // (reproduced in `e2e-locked-*`, the sibling fixture in this same file
+  // that had the identical no-cleanup bug).
+  try {
+    // ---- create --------------------------------------------------------
+    await page.goto("/admin");
+    await expect(page.getByRole("heading", { name: "Admin" })).toBeVisible();
+    await page.getByRole("link", { name: /new rankle/i }).click();
 
-  // ---- back to the first draft: unschedule, edit, reschedule --------------
-  await page.goto("/admin");
-  await page.getByRole("link", { name: new RegExp(`E2E Admin Test Game.*/${slug}`, "s") }).click();
+    await page.getByLabel("Title").fill("E2E Admin Test Game");
+    await page.getByLabel("Slug").fill(slug);
+    await page.getByRole("button", { name: /^create draft$/i }).click();
 
-  await page.getByRole("button", { name: /^unschedule$/i }).click();
-  await page.getByRole("button", { name: /^confirm$/i }).click();
-  await expect(page.getByText(/^draft$/i)).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "E2E Admin Test Game" })).toBeVisible();
+    await expect(page.getByText(/^draft$/i)).toBeVisible();
 
-  await page.getByLabel("Title").fill("E2E Admin Test Game (Edited)");
-  await page.getByRole("button", { name: /^save changes$/i }).click();
-  await expect(page.getByText(/^saved$/i)).toBeVisible();
+    // ---- add items -------------------------------------------------------
+    await page.getByRole("button", { name: /\+ add item/i }).click();
+    await page.getByRole("button", { name: /\+ add item/i }).click();
+    const labelInputs = page.getByPlaceholder("Item label");
+    await labelInputs.nth(0).fill("Alpha");
+    await labelInputs.nth(1).fill("Beta");
+    await page.getByRole("button", { name: /^save items$/i }).click();
+    await expect(page.getByText(/^saved$/i)).toBeVisible();
 
-  await page.locator('input[type="date"]').fill(futureDateString(randomOffset(310, 600)));
-  await page.getByRole("button", { name: /^schedule$/i }).click();
-  await expect(page.getByText(/^scheduled$/i)).toBeVisible();
-  await expect(page.getByRole("heading", { level: 1, name: "E2E Admin Test Game (Edited)" })).toBeVisible();
+    // preview reflects the saved items
+    await expect(page.getByRole("heading", { name: "Preview" })).toBeVisible();
+    await expect(page.getByText("Alpha")).toBeVisible();
+    await expect(page.getByText("Beta")).toBeVisible();
+
+    // ---- schedule ----------------------------------------------------------
+    const freeDate = futureDateString(randomOffset(15, 300));
+    await page.locator('input[type="date"]').fill(freeDate);
+    await page.getByRole("button", { name: /^schedule$/i }).click();
+    await expect(page.getByText(/^scheduled$/i)).toBeVisible();
+
+    // shows up in Upcoming on the dashboard
+    await page.goto("/admin");
+    await expect(
+      page.getByRole("link", { name: new RegExp(`E2E Admin Test Game.*/${slug}`, "s") }),
+    ).toBeVisible();
+
+    // ---- duplicate release date is rejected ---------------------------------
+    await page.goto("/admin/tierlists/new");
+    await page.getByLabel("Title").fill("E2E Admin Conflict Game");
+    await page.getByLabel("Slug").fill(slug2);
+    await page.getByRole("button", { name: /^create draft$/i }).click();
+    await page.locator('input[type="date"]').fill(freeDate);
+    await page.getByRole("button", { name: /^schedule$/i }).click();
+    await expect(page.getByText(/already scheduled for that date/i)).toBeVisible();
+
+    // ---- back to the first draft: unschedule, edit, reschedule --------------
+    await page.goto("/admin");
+    await page.getByRole("link", { name: new RegExp(`E2E Admin Test Game.*/${slug}`, "s") }).click();
+
+    await page.getByRole("button", { name: /^unschedule$/i }).click();
+    await page.getByRole("button", { name: /^confirm$/i }).click();
+    await expect(page.getByText(/^draft$/i)).toBeVisible();
+
+    await page.getByLabel("Title").fill("E2E Admin Test Game (Edited)");
+    await page.getByRole("button", { name: /^save changes$/i }).click();
+    await expect(page.getByText(/^saved$/i)).toBeVisible();
+
+    await page.locator('input[type="date"]').fill(futureDateString(randomOffset(310, 600)));
+    await page.getByRole("button", { name: /^schedule$/i }).click();
+    await expect(page.getByText(/^scheduled$/i)).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "E2E Admin Test Game (Edited)" })).toBeVisible();
+  } finally {
+    await serviceClient!.from("tierlists").delete().in("slug", [slug, slug2]);
+  }
 });
 
 test("duplicate creates a fresh draft with copied items, not the original's schedule", async ({ page }) => {
@@ -226,24 +237,36 @@ test("a Rankle with official submissions is historically locked in the editor UI
     .single();
   expect(createErr).toBeNull();
 
-  const { data: item, error: itemErr } = await serviceClient!
-    .from("tierlist_items")
-    .insert({ tierlist_id: tierlist!.id, label: "Only Item", sort_order: 0 })
-    .select("id")
-    .single();
-  expect(itemErr).toBeNull();
+  try {
+    const { data: item, error: itemErr } = await serviceClient!
+      .from("tierlist_items")
+      .insert({ tierlist_id: tierlist!.id, label: "Only Item", sort_order: 0 })
+      .select("id")
+      .single();
+    expect(itemErr).toBeNull();
 
-  const { error: subErr } = await serviceClient!
-    .from("submissions")
-    .insert({ tierlist_id: tierlist!.id, guest_id: randomUUID() })
-    .select("id")
-    .single();
-  expect(subErr).toBeNull();
-  void item;
+    const { error: subErr } = await serviceClient!
+      .from("submissions")
+      .insert({ tierlist_id: tierlist!.id, guest_id: randomUUID() })
+      .select("id")
+      .single();
+    expect(subErr).toBeNull();
+    void item;
 
-  await page.goto(`/admin/tierlists/${tierlist!.id}`);
-  await expect(page.getByText(/historical content now/i)).toBeVisible();
-  await expect(page.getByLabel("Title")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: /^save items$/i })).toHaveCount(0);
-  await expect(page.getByText("Only Item").first()).toBeVisible();
+    await page.goto(`/admin/tierlists/${tierlist!.id}`);
+    await expect(page.getByText(/historical content now/i)).toBeVisible();
+    await expect(page.getByLabel("Title")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /^save items$/i })).toHaveCount(0);
+    await expect(page.getByText("Only Item").first()).toBeVisible();
+  } finally {
+    // This fixture's release_date is drawn from a fixed-size random range
+    // (see `randomOffset`) and is never overwritten by anything else, so a
+    // leftover row here permanently consumes one of that range's dates —
+    // repeated local runs without an intervening `supabase db reset`
+    // eventually collide on `tierlists_release_date_key` (reproduced: 700
+    // possible days, ~1 collision per 8-10 uncleaned runs). Deleting only
+    // this test's own row (cascades to its item/submission) keeps the date
+    // range free for every future run instead of merely reducing the odds.
+    await serviceClient!.from("tierlists").delete().eq("id", tierlist!.id);
+  }
 });

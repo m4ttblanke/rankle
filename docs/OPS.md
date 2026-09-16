@@ -857,3 +857,122 @@ Prefer a small number of tools you understand over a complicated observability s
 The goal is not enterprise ceremony.
 
 The goal is to know when the game is broken and to be able to fix it safely.
+
+---
+
+## 30. Test Suite Reliability (2026-09-15 flakiness audit)
+
+Root causes found and fixed for the flakes previously explained away as
+"known flaky, passes on rerun." Each was reproduced with a concrete
+mechanism before being fixed — see git history on this date for the exact
+diffs.
+
+**`accounts.spec.ts` — "another signed-in user cannot view someone else's
+history detail page."** `rankAndSubmit()` was followed immediately by
+`page.goto("/profile")` with no wait for the post-submit redirect, unlike
+every other call site of `rankAndSubmit()` in the same file. Under any real
+load, `page.goto()`'s hard navigation cancels the still-in-flight
+`submit_ranking` Server Action request (visible as `ECONNRESET`/`aborted` in
+the dev server log), so the owner's submission never lands and `/profile`
+correctly shows zero Rankles. Fix: added the same
+`await expect(page).toHaveURL(/\/results\/?$/)` wait the other five call
+sites already use. Reproduced on demand pre-fix (failed the first isolated
+run); 10+ clean runs post-fix.
+
+**`/profile`, `/archive`, `/friends`, `/history/[id]`, `/results`, and
+`/share/[token]` — duplicate ARIA `banner` landmark.** Every one of these
+pages renders the shared `<AppHeader>` (a real `<header>`, correctly the
+page's one `banner` landmark) followed immediately by a second, page-local
+`<header>` for the page's own title block. Neither is nested inside
+`article`/`aside`/`main`/`nav`/`section`, so per the HTML spec both resolve
+to `role=banner` — a real accessibility defect (a screen reader announces
+two "banner" landmarks), not just a test-locator ambiguity. Only `/profile`
+had been reported because it's the one route `retention.spec.ts` explicitly
+loops over with a bare `getByRole("banner")` assertion, but the identical
+bug existed on five other routes.  Fixed at the markup level: each page-local
+title `<header>` became a plain `<div>` (same classes, same content — no
+CSS or JS anywhere selected on the `header` tag itself). `AppHeader` is now
+the sole banner landmark app-wide. No test was loosened; `.first()` was
+never needed because the underlying markup was actually wrong.
+
+**`admin.spec.ts` — `tierlists_release_date_key` collisions.** Two tests
+insert a real `tierlists` row at a randomly-offset date
+(`e2e-locked-*` in the past, `E2E Admin Test Game` in the future) specifically
+so repeated local runs don't collide with each other — but neither test ever
+deleted its row afterward. Across enough uncleaned runs without an
+intervening `supabase db reset`, the birthday paradox catches up with the
+finite date range and a fresh insert collides with 23505. Reproduced
+directly (`Key (release_date)=(2024-12-20) already exists`) after ~8
+uncleaned local runs. Fixed: both tests now delete their own row(s) by id/
+slug in a `finally` block, so no run leaves fixture state behind for a later
+run to collide with.
+
+**Vitest integration tests — shared "current game" race.**
+`submit-ranking`, `get-results`, `get-share`, `claim-guest-submissions`, and
+`friends` integration tests all call `submit_ranking()`, which — by design
+(`private.current_daily_game_id()` is a deliberate global singleton, see
+`SECURITY.md`) — only accepts submissions for whichever tierlist is
+currently "the" game. This makes true per-file fixture isolation impossible
+for this specific group without weakening that invariant, so Vitest's
+default full file-parallelism let these five files race each other's
+aggregate-count assertions. Fixed narrowly: `vitest.config.mts` now defines
+two projects — `unit` (everything else, still fully parallel) and
+`integration-shared-current-game` (exactly these five files,
+`fileParallelism: false`). Nothing else was serialized. 5 consecutive
+`npx vitest run` runs: 489/489 every time.
+
+**`get-daily-game.integration.test.ts` was stale.** It still ran the raw
+pre-Milestone-8 `tierlists` query the resolver used before
+`get_daily_game()`/`private.current_daily_game_id()` existed, per the TODO
+item this closes. Rewritten into two blocks: a remote smoke test (RPC now
+called instead of the raw query, matching what `getDailyGame()` actually
+calls) and a new local block against the seeded fixtures, which resolves
+today's live game while correctly excluding the seeded future-scheduled and
+past-archived games, checks item ordering, and confirms public
+(unauthenticated) callability. Resolver day-rollover/ordering semantics
+themselves are already exhaustively covered at the SQL level
+(`supabase/tests/rls_spec.sql` sec 11) and are intentionally not re-tested
+here — this file only exercises the JS integration boundary.
+
+**Not a code defect: transient auth-callback failures under extreme,
+self-induced local load.** While stress-testing this fix (30+ consecutive
+full-suite/admin-suite runs back-to-back on a single dev machine with an
+IDE and several MCP servers also running), one run produced a genuine
+`/auth/callback` PKCE-exchange failure (`/login?error=1`) on an otherwise
+correct flow, and a later run under even heavier accumulated load produced
+a large cascade of timeouts across many files (24 failures, 2.4 min instead
+of ~30s). System load (`uptime`) was elevated (>20 on a 14-core machine)
+during both; the very next run after backing off passed cleanly (98/98,
+~30s), and Docker/Postgres/Next.js showed no crash or leaked process. This
+is real resource exhaustion, but it is a property of running dozens of
+uninterrupted full-suite iterations on a shared, already-loaded workstation,
+not something a single normal local run or a dedicated CI runner will hit.
+No code or test changed for this — do not add retries or sleeps to paper
+over it. If it becomes a real CI symptom, look at CI runner CPU/memory
+headroom first, not the test code.
+
+**Arbitrary waits reviewed, none removed.** `e2e/ranking.spec.ts`'s
+`waitForTimeout` calls in `dragCardToLane()` exist to give dnd-kit's pointer
+sensor real wall-clock gaps between synthetic mouse events (there is no DOM
+condition to await — it's input-event timing, not render timing) and were
+left as-is. The `setTimeout(r, 250)` calls inside every spec file's
+Mailpit-polling `getLatestMagicLink()` are a bounded poll-with-backoff
+against an inherently async external system (already scoped by exact
+recipient address, not "most recent overall" — see the comment in
+`accounts.spec.ts`), not a blind sleep, and were also left as-is.
+
+**Retry/worker configuration: unchanged, and not the fix.** Playwright
+already runs with `retries: 0` locally / `1` in CI and `fullyParallel: true`
+at the default worker count (half of CPU cores); none of the fixes above
+relied on raising retries or lowering parallelism. The one narrow
+serialization introduced (the Vitest integration-project above) is scoped
+to five specific files that share a real database invariant, not a general
+concurrency reduction.
+
+**Running the suite.** `npm test` and `npm run test:e2e` are unchanged
+commands and now produce deterministic results under normal (non-abusive)
+local use: `npx vitest run` (489/489, 5 consecutive local runs, and again
+after a `supabase db reset`) and `npx playwright test` (98/98 across
+multiple consecutive runs post-fix, run at a normal cadence). A red run
+should now be treated as a real signal, not the historical "probably the
+known flake."

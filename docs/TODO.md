@@ -112,11 +112,12 @@ Periodically clean up old completed items.
 - [ ] Add topic backlog (out of scope for Milestone 8 — see CLAUDE.md's M8 scope note)
 - [x] Add duplicate-game action (Milestone 8 — `duplicate_tierlist` RPC)
 - [x] Add emergency disable/unpublish action (Milestone 8 — `unschedule_tierlist`, future-scheduled-only, returns to draft; no separate "disable" verb was added — see the Milestone 8 write-up under Completed for why)
-- [ ] The Milestone 8 migration is now applied to the remote project (and M9's
-  `next_release_date` migration as of 2026-09-13). Update
-  `lib/game/get-daily-game.integration.test.ts` to also (or instead) call the
-  `get_daily_game()` RPC — it still only smoke-tests the raw `tierlists` query
-  the resolver used *before* M8.
+- [x] **Update `get-daily-game.integration.test.ts` to call the
+  `get_daily_game()` RPC (2026-09-15, Test Suite Reliability audit).**
+  Rewritten into a remote smoke test (RPC instead of the raw pre-M8
+  `tierlists` query) plus a new local block against the seeded fixtures
+  covering current-vs-future-vs-past resolution, item ordering, and public
+  callability — see `docs/OPS.md` sec 30.
 
 ## Accounts
 
@@ -447,18 +448,27 @@ meaningful sample), new-vs-returning and return rate (need multiple days).
 - [ ] Add automated critical-flow smoke tests
 - [ ] Add usage/cost review procedure
 - [ ] Document significant incident template
-- [ ] Fix pre-existing Vitest integration-test flakiness: several
-  `*.integration.test.ts` files (submit-ranking, get-results, get-share,
-  claim-guest-submissions, friends) all submit rankings to the same seeded
-  local "live" game and run as separate parallel files/workers by default,
-  so `total_submissions`/aggregate-count assertions can race against each
-  other (surfaced during Milestone 8 while adding
-  `lib/admin/admin-rpcs.integration.test.ts`; confirmed pre-existing and
-  unrelated to M8's own changes — `npx vitest run --no-file-parallelism`
-  passes 400/400 deterministically, the default parallel run does not).
-  Fix by disabling file parallelism for `*.integration.test.ts` specifically
-  in `vitest.config.mts`, or by giving each integration file its own
-  dedicated fixture tierlist instead of sharing the seeded one.
+- [x] **Fix pre-existing Vitest integration-test flakiness (2026-09-15,
+  Test Suite Reliability audit — `docs/OPS.md` sec 30).** Root cause
+  confirmed: `submit_ranking()` only accepts submissions for whichever
+  tierlist `private.current_daily_game_id()` currently resolves to — a
+  deliberate global singleton — so the five files sharing the seeded "live"
+  game genuinely cannot each get an isolated fixture without weakening that
+  invariant. Fixed with the narrower of the two options this item
+  considered: `vitest.config.mts` now defines a `unit` project (everything
+  else, still fully parallel) and an `integration-shared-current-game`
+  project (submit-ranking, get-results, get-share,
+  claim-guest-submissions, friends — `fileParallelism: false`), rather than
+  disabling parallelism suite-wide. 5 consecutive `npx vitest run` runs:
+  489/489 every time, including after a fresh `supabase db reset`. Also
+  fixed in the same pass: the `accounts.spec.ts` history-detail Playwright
+  flake (missing post-submit wait), a real duplicate-`banner`-landmark
+  accessibility bug on six routes (not just `/profile`), an
+  `admin.spec.ts` fixture-cleanup gap that could collide on
+  `tierlists_release_date_key` after enough uncleaned local runs, and
+  `get-daily-game.integration.test.ts`'s staleness (below). Full details,
+  including the auth-callback failure observed only under extreme
+  self-induced local load (not a code defect), in `docs/OPS.md` sec 30.
 
 ## Security (deferred beyond the initial schema/RLS migration)
 
@@ -1048,12 +1058,12 @@ function regression diff against a pre-deploy snapshot).
 
 Follow-ups it surfaced (also tracked above, under Admin/Operations):
 
-- [ ] Pre-existing Vitest integration-test flakiness across `lib/game/*.integration.test.ts`
+- [x] Pre-existing Vitest integration-test flakiness across `lib/game/*.integration.test.ts`
   (shared seeded "live" game, parallel file workers) — confirmed unrelated to
-  M8, tracked under Operations above.
-- [ ] `lib/game/get-daily-game.integration.test.ts` still smoke-tests the
+  M8, fixed 2026-09-15, tracked under Operations above.
+- [x] `lib/game/get-daily-game.integration.test.ts` still smoke-tests the
   pre-M8 raw query rather than the `get_daily_game()` RPC now that both are
-  applied remotely — tracked under Admin above.
+  applied remotely — fixed 2026-09-15, tracked under Admin above.
 - [ ] No explicit "archive" admin action was built — a superseded game
   naturally stops being current the moment a newer one releases, and the
   historical lock already makes further editing impossible once it has

@@ -53,7 +53,7 @@ export function ResultsView({
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-8 px-4 py-5 sm:px-6 sm:py-8">
-      <header className="flex flex-col gap-1.5">
+      <div className="flex flex-col gap-1.5">
         <span className="text-xs font-semibold uppercase tracking-wide text-muted">
           Results
         </span>
@@ -61,7 +61,7 @@ export function ResultsView({
         <p className="text-sm text-muted" aria-live="off">
           {meta}
         </p>
-      </header>
+      </div>
 
       <section aria-labelledby="community-heading" className="flex flex-col gap-3">
         <h2

@@ -37,7 +37,7 @@ export default async function ProfilePage() {
     <>
       <AppHeader />
       <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-8 px-4 pb-5 pt-6 sm:px-6 sm:pb-8">
-        <header className="flex items-center gap-4">
+        <div className="flex items-center gap-4">
           <AvatarPlaceholder name={profile.displayName} />
           <div className="flex flex-col gap-0.5">
             <FocusHeading className="font-display text-2xl font-extrabold tracking-tight text-foreground sm:text-3xl">
@@ -47,7 +47,7 @@ export default async function ProfilePage() {
               @{profile.username} · Joined {formatJoined(profile.createdAt)}
             </p>
           </div>
-        </header>
+        </div>
 
         <section aria-labelledby="edit-heading" className="flex flex-col gap-3">
           <h2 id="edit-heading" className="font-display text-xl font-extrabold text-foreground">

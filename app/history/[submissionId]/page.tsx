@@ -52,14 +52,14 @@ export default async function HistoryDetailPage({ params }: Params) {
     <>
       <AppHeader />
       <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-6 px-4 pb-5 pt-6 sm:px-6 sm:pb-8">
-        <header className="flex flex-col gap-1.5">
+        <div className="flex flex-col gap-1.5">
           <span className="text-xs font-semibold uppercase tracking-wide text-muted">
             Your ranking
           </span>
           <h1 className="font-display text-3xl font-extrabold tracking-tight text-foreground sm:text-4xl">
             {detail.tierlistTitle}
           </h1>
-        </header>
+        </div>
 
         <ul className="flex flex-col gap-2">
           {opinionItems.map((item) => (

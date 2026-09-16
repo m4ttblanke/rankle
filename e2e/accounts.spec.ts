@@ -247,6 +247,7 @@ test("another signed-in user cannot view someone else's history detail page", as
   await signInViaMagicLink(page, emailOwner);
   await page.goto("/");
   await rankAndSubmit(page);
+  await expect(page).toHaveURL(/\/results\/?$/);
   await page.goto("/profile");
   const href = await page.getByRole("link", { name: /fast food fries/i }).getAttribute("href");
   expect(href).toBeTruthy();
