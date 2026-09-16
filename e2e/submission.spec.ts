@@ -106,7 +106,11 @@ test("a failed submission preserves the ranking and allows retry", async ({
   );
 
   await page.getByRole("button", { name: /^lock it in$/i }).click();
-  await expect(page.getByRole("alert")).toBeVisible();
+  // Scoped by text since Next's own route announcer also carries
+  // role="alert" (empty, off-screen) — see e2e/friends.spec.ts for the
+  // same pattern.
+  const submitError = page.getByRole("alert").filter({ hasText: /couldn.t reach the server/i });
+  await expect(submitError).toBeVisible();
   // ranking is untouched — every item is still placed
   for (const label of ITEMS) {
     await expect(cardButton(page, label)).toBeVisible();
