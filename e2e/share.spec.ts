@@ -64,6 +64,19 @@ async function grantClipboard(context: BrowserContext) {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
 }
 
+/** Force `navigator.clipboard.writeText` to reject, deterministically —
+ *  the exact production regression (Share Button Reliability fix,
+ *  docs/TODO.md): a real share link exists, but the browser-level copy
+ *  fails. */
+async function withFailingClipboard(context: BrowserContext) {
+  await context.addInitScript(() => {
+    Object.defineProperty(window.navigator, "clipboard", {
+      value: { writeText: () => Promise.reject(new Error("denied")) },
+      configurable: true,
+    });
+  });
+}
+
 /** Submit today's game, share it (copy-link fallback), and return the copied
  *  share URL. */
 async function createShareLink(page: Page, context: BrowserContext): Promise<string> {
@@ -293,4 +306,49 @@ test("mobile: the locked gate and the reveal both render without horizontal over
   expect(overflow).toBeLessThanOrEqual(0);
 
   await recipientContext.close();
+});
+
+test("clipboard copy failure after a successful share creation never claims Rankle failed to create the link — the real URL stays manually usable (Share Button Reliability fix)", async ({
+  page,
+  context,
+}) => {
+  await withoutNativeShare(context);
+  await withFailingClipboard(context);
+  await page.goto("/");
+  await rankAndSubmit(page);
+  await expect(page.getByRole("heading", { name: /community verdict/i })).toBeVisible();
+
+  await page.getByRole("button", { name: /^share your ranking$/i }).click();
+
+  // The create_share RPC succeeded — this must never render as a creation
+  // failure, even though the browser-level clipboard write failed.
+  await expect(page.getByText(/couldn.t create a share link/i)).toHaveCount(0);
+  await expect(page.getByText(/share link created, but we couldn.t copy/i)).toBeVisible();
+
+  const field = page.getByLabel(/share link/i);
+  await expect(field).toBeVisible();
+  await expect(field).toHaveValue(/\/share\/[0-9a-f]{16,64}$/);
+
+  // The manual retry button is present and targets the same real link.
+  await expect(page.getByRole("button", { name: /^copy$/i })).toBeVisible();
+});
+
+test("mobile: the clipboard-failure fallback field renders without horizontal overflow", async ({
+  page,
+  context,
+}) => {
+  await page.setViewportSize({ width: 320, height: 844 });
+  await withoutNativeShare(context);
+  await withFailingClipboard(context);
+  await page.goto("/");
+  await rankAndSubmit(page);
+  await expect(page.getByRole("heading", { name: /community verdict/i })).toBeVisible();
+
+  await page.getByRole("button", { name: /^share your ranking$/i }).click();
+  await expect(page.getByText(/share link created, but we couldn.t copy/i)).toBeVisible();
+
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  );
+  expect(overflow).toBeLessThanOrEqual(0);
 });

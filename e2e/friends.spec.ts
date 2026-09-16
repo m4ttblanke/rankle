@@ -241,7 +241,15 @@ test("community results and sharing are unaffected by the Friends feature", asyn
   await expect(page.getByRole("heading", { name: /^friends$/i })).toHaveCount(0);
 
   await page.getByRole("button", { name: /^share your ranking$/i }).click();
+  // Tolerant of the local/headless environment's clipboard permission
+  // state — either a real copy succeeded, or the browser-level copy failed
+  // but the share link was still genuinely created (Share Button
+  // Reliability fix, docs/TODO.md). Never tolerate the true creation-failure
+  // message here: this test's own point is that sharing still works.
   await expect(
-    page.getByText(/^link copied$/i).or(page.getByText(/couldn.t create a share link/i)),
+    page
+      .getByText(/^link copied$/i)
+      .or(page.getByText(/share link created, but we couldn.t copy/i)),
   ).toBeVisible();
+  await expect(page.getByText(/couldn.t create a share link/i)).toHaveCount(0);
 });

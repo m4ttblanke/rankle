@@ -1288,10 +1288,12 @@ remote migration or any deploy happened — both caught before shipping:**
    result for both `entry_source` and the attribution decision.
 
 **One pre-existing, unrelated issue found during production rollout
-verification (2026-09-15) — not fixed as part of this milestone, since it
-predates it and touches a file this milestone doesn't own:**
+verification (2026-09-15) — not fixed as part of the Product Analytics
+milestone, since it predates it and touches a file that milestone doesn't
+own:**
 
-- [ ] `components/share/share-button.tsx` shows the same generic "Couldn't
+- [x] **Fixed (Share Button Reliability, 2026-09-15).**
+  `components/share/share-button.tsx` showed the same generic "Couldn't
   create a share link — try again." message for two different failure
   modes: `createShare` actually failing, and `navigator.clipboard
   .writeText()` failing after a successful, real share creation. Caught
@@ -1300,9 +1302,22 @@ predates it and touches a file this milestone doesn't own:**
   via Supabase's own request logs — 200, and the idempotent token still
   resolves at `/share/[token]` correctly) but the UI still showed the
   creation-failure message, because the clipboard write itself failed in
-  that automated browser context. Misleading but not a data-integrity or
-  security issue — no duplicate share was created (`create_share` is
-  idempotent) and no incorrect analytics were logged. Worth a small fix
-  later (distinguish the two `catch` blocks with different copy) but out of
-  scope here — this file was not touched by the Product Analytics
-  milestone.
+  that automated browser context. Never a data-integrity or security
+  issue — no duplicate share was ever created (`create_share` is
+  idempotent) and no incorrect analytics were logged.
+
+  Fix: the resolved share URL is now kept in component state once
+  `createShare` succeeds, independent of whatever `status` the UI is
+  showing — a `navigator.share`/`navigator.clipboard` failure afterward can
+  change `status` but can never discard that URL. `Status` gained
+  `create_failed` (the real backend failure, keeps the original message)
+  and `copy_failed` (link exists, only the browser-level convenience API
+  failed) in place of one generic `"error"`. `copy_failed` renders a small
+  inline fallback — a `readOnly`, auto-selected, keyboard/mobile-usable
+  input holding the real URL plus a "Copy" button that retries the
+  clipboard directly (no re-call to `createShare`; idempotency preserved).
+  A real (non-cancellation) `navigator.share` failure now falls back to
+  clipboard once, deterministically — no retry loop. Cancellation
+  (`AbortError`) was already handled correctly and is unchanged. No
+  database/RLS change; no analytics vocabulary change (this bug and its fix
+  are entirely client-side UI state).
