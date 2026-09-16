@@ -776,3 +776,39 @@ Do not add services that create significant fixed cost before the project has de
 Production deployment should be boring.
 
 The interesting complexity belongs in the product experience, not the release pipeline.
+
+---
+
+## 30. Continuous Integration (2026-09-15)
+
+`.github/workflows/ci.yml` is CI. It validates every pull request and every
+push to `main`: lint, typecheck, a production build, the full Vitest suite,
+`supabase/tests/rls_spec.sql`, Playwright, and a secret scan — all in one
+job, against a local Supabase stack the workflow starts with `npm run
+db:start`/`db:reset` and stops at the end. See `docs/OPS.md` sec 31 for the
+full design rationale (why one job, why the build step runs before Docker,
+why `scripts/test-sql.sh` and `scripts/secret-scan.sh` exist as thin
+wrapper scripts rather than inline workflow steps).
+
+**CI and CD stay separate.** CI never deploys anything and never touches
+Vercel or a real Supabase project:
+
+- No GitHub Secret is read anywhere in the workflow.
+- No production Supabase URL, service-role key, database password, Resend
+  key, or Vercel token exists in the workflow file or in CI's environment.
+  Every credential CI uses is either generated fresh by `supabase start`
+  for that run only (the same fixed local-only demo keys every developer's
+  local stack already uses) or a disposable string generated in the
+  workflow itself (`GUEST_COOKIE_SECRET`).
+- CD is unchanged: Vercel's existing Git integration deploys Preview
+  environments for pull requests and Production from `main`, exactly as
+  before this workflow existed. CI does not call `vercel deploy` and does
+  not duplicate that responsibility.
+- Production Supabase migrations remain a manual, explicit rollout step
+  (sec 6-7 above). CI applies migrations only to its own ephemeral local
+  database and never runs `supabase db push` against the linked remote
+  project.
+
+**Local parity:** `npm run verify` runs the same lint/typecheck/Vitest/
+SQL/RLS/secret-scan/build checks CI runs, in the same order, minus
+Playwright (README.md "Testing" section).

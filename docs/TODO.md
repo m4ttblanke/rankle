@@ -469,6 +469,25 @@ meaningful sample), new-vs-returning and return rate (need multiple days).
   `get-daily-game.integration.test.ts`'s staleness (below). Full details,
   including the auth-callback failure observed only under extreme
   self-induced local load (not a code defect), in `docs/OPS.md` sec 30.
+- [x] **Add GitHub Actions CI (2026-09-15).** Rankle had no CI before this.
+  `.github/workflows/ci.yml` runs on every PR and every push to `main`:
+  lint, typecheck, build, Vitest, SQL/RLS, Playwright, secret scan — one
+  job, against an ephemeral local Supabase stack, no GitHub Secrets, no
+  production credentials reachable from the workflow. Vercel's existing
+  Git integration remains the only thing that deploys anything. Full
+  design rationale in `docs/OPS.md` sec 31, CI/CD boundary in
+  `docs/DEPLOY.md` sec 30. Added `scripts/test-sql.sh` (the SQL suite
+  never fails its own exit code on assertion failure — this wrapper does),
+  `scripts/setup-env-test.sh` (generates `.env.test` from the local
+  Supabase stack), and `scripts/secret-scan.sh` (replaces the previously
+  ad hoc manual grep) — all three also usable locally via `npm run
+  test:sql` / `env:test:generate` / `secret-scan`, plus a new `npm run
+  verify` composing the non-browser checks.
+  - [ ] **Follow-up (not applied by this task — requires repo owner
+    action):** configure branch protection on `main` per the recommended
+    lightweight solo setup — require the CI check to pass before merge,
+    block force-push and branch deletion, no required PR review for now.
+    See `docs/OPS.md` sec 31.
 
 ## Security (deferred beyond the initial schema/RLS migration)
 

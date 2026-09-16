@@ -11,7 +11,11 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:integration": "vitest run lib/game/submit-ranking.integration.test.ts",
+    "test:sql": "bash scripts/test-sql.sh",
     "test:e2e": "playwright test",
+    "secret-scan": "bash scripts/secret-scan.sh",
+    "env:test:generate": "bash scripts/setup-env-test.sh",
+    "verify": "npm run lint && npm run typecheck && npm test && npm run test:sql && npm run secret-scan && npm run build",
     "db:start": "npx --yes supabase start",
     "db:stop": "npx --yes supabase stop",
     "db:reset": "npx --yes supabase db reset"

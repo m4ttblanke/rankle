@@ -359,14 +359,21 @@ Changes should be tested before being merged or deployed.
 ### Commands
 
 ```bash
-npm run lint        # ESLint (flat config)
-npm run typecheck   # tsc --noEmit
-npm test            # Vitest (unit + read-only integration)
-npm run test:e2e    # Playwright end-to-end (auto-starts the dev server)
-npm run build       # production build (also runs the type check)
+npm run lint         # ESLint (flat config)
+npm run typecheck    # tsc --noEmit
+npm test             # Vitest (unit + read-only integration)
+npm run test:sql     # SQL/RLS behavioral suite (needs local Supabase running)
+npm run test:e2e     # Playwright end-to-end (auto-starts the dev server)
+npm run secret-scan  # pattern-based scan for accidentally committed secrets
+npm run build        # production build (also runs the type check)
+npm run verify       # lint + typecheck + test + test:sql + secret-scan + build
 ```
 
 First-time e2e setup: `npx playwright install chromium`.
+
+`npm run verify` composes every non-browser check into one command — the
+closest local equivalent to what CI runs, minus Playwright (see
+"Continuous Integration" below).
 
 ### Unit / integration (Vitest)
 
@@ -391,6 +398,12 @@ Database behavioral tests are located in:
 supabase/tests/
 ```
 
+Run them with `npm run test:sql` against a running local Supabase stack
+(`npm run db:start && npm run db:reset` first). The test file prints a
+PASS/FAIL row per assertion but always exits `0` on its own; the `test:sql`
+script is what turns a failed assertion into a real failing exit code
+(`scripts/test-sql.sh`).
+
 These tests verify important database guarantees such as:
 
 - Row Level Security
@@ -401,6 +414,18 @@ These tests verify important database guarantees such as:
 - Transactional aggregate updates
 - Results spoiler protection
 - Share-link authorization
+
+### Continuous Integration
+
+`.github/workflows/ci.yml` runs on every pull request and every push to
+`main`: lint, typecheck, a production build, the full Vitest suite, the
+SQL/RLS suite, Playwright, and the secret scan — all against an ephemeral
+local Supabase stack the workflow starts and tears down itself. It never
+reads a GitHub Secret and never has production credentials of any kind
+available to it. Deployment is unaffected and stays entirely with Vercel's
+existing Git integration (Preview on PRs, Production on merge to `main`).
+See `docs/OPS.md` sec 31 for the full design and `docs/DEPLOY.md` for the
+CI/CD boundary.
 
 ---
 

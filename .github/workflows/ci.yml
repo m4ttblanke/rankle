@@ -1,0 +1,109 @@
+name: CI
+
+# Validates every PR and every push to main. Deployment stays entirely with
+# Vercel's existing Git integration (Preview on PRs, Production on merge to
+# main) — this workflow never deploys anything and never touches Vercel or
+# production Supabase. See docs/OPS.md sec 31 for the full design rationale.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NEXT_TELEMETRY_DISABLED: "1"
+
+jobs:
+  ci:
+    name: Lint, typecheck, tests, build, secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      # Cheapest, most self-contained checks first — no dependencies
+      # installed yet, no Docker started yet, so an obvious problem here
+      # (a leaked credential, a lint/type error) fails in seconds rather
+      # than after paying for a Supabase boot.
+      - name: Secret scan
+        run: bash scripts/secret-scan.sh
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # No live backend is required for `next build` here: every route in
+      # this app is server-rendered on demand (no generateStaticParams / no
+      # build-time data fetching), so lib/env.ts only needs a
+      # syntactically-valid URL/key to pass its Zod schema. These values
+      # are never reachable — Supabase isn't started yet at this point in
+      # the job — and are distinct from the real local-stack values used
+      # by the test steps below.
+      - name: Production build (fast-fail, no backend required)
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: "http://127.0.0.1:54321"
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "sb_publishable_ci-placeholder"
+          NEXT_PUBLIC_APP_URL: "http://localhost:3000"
+
+      # --- From here on: real local Supabase stack, real local Postgres,
+      # real local Auth/Mailpit — an ephemeral instance that lives and dies
+      # with this runner. Nothing below ever reads a GitHub Secret and
+      # nothing below can reach the production Supabase project (there is
+      # no production URL/key anywhere in this workflow to reach it with).
+      - name: Start local Supabase
+        run: npm run db:start
+
+      - name: Reset local database (apply migrations + seed)
+        run: npm run db:reset
+
+      - name: Generate .env.test from the local Supabase stack
+        run: |
+          npm run env:test:generate
+          # Export the same values as real process env vars so every later
+          # step (Vitest, the build-adjacent tooling, etc.) sees them
+          # without re-parsing the file. Still local-only, still ephemeral.
+          sed 's/"//g' .env.test >> "$GITHUB_ENV"
+
+      - name: Vitest (unit + shared-current-game integration)
+        run: npm test
+
+      - name: SQL / RLS
+        run: npm run test:sql
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Playwright e2e
+        run: npm run test:e2e
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+
+      - name: Stop local Supabase
+        if: always()
+        run: npm run db:stop

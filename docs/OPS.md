@@ -976,3 +976,94 @@ after a `supabase db reset`) and `npx playwright test` (98/98 across
 multiple consecutive runs post-fix, run at a normal cadence). A red run
 should now be treated as a real signal, not the historical "probably the
 known flake."
+
+---
+
+## 31. GitHub Actions CI (2026-09-15)
+
+Rankle had no CI before this. The now-trustworthy suite (sec 30 above) made
+it worth gating merges on. `.github/workflows/ci.yml` runs on every pull
+request and every push to `main`. See `docs/DEPLOY.md` sec 30 for the
+CI/CD boundary and what it does and doesn't touch; this section is the
+"why it's built this way."
+
+**One job, not four.** The task this was built from sketched a four-lane
+shape (static checks / unit+integration / browser / build+security). All
+four ended up as ordered steps in a single job instead: the browser lane
+and the unit/integration lane both need the same local Supabase stack, and
+running that boot twice (once per job) would double the slowest, most
+Docker-dependent part of the pipeline for no isolation benefit — nothing
+here needs to run on a different runner or in true parallel with anything
+else. One job also means one linear log a solo maintainer can read top to
+bottom instead of jumping between job summaries.
+
+**Ordering is deliberately fail-fast.** Steps run cheapest-and-most-likely-
+to-catch-something first: secret scan (no dependencies installed yet) →
+lint/typecheck → production build → only then Docker/Supabase → Vitest →
+SQL/RLS → Playwright. The build step runs *before* Supabase starts, using
+fixed placeholder values (`sb_publishable_ci-placeholder` etc.) that are
+never reachable at that point in the job — every route in this app is
+server-rendered on demand with no build-time data fetching, so `next
+build` only needs `lib/env.ts`'s Zod schema to see syntactically valid
+values, never a live connection (confirmed locally: build succeeds with
+Supabase stopped entirely). A change with an obvious lint/type/build
+problem now fails in well under a minute instead of after paying for a
+multi-minute Docker boot.
+
+**`scripts/test-sql.sh` exists because `rls_spec.sql` can't fail on its
+own.** The SQL suite wraps every assertion in `BEGIN ... ROLLBACK` and only
+ever prints a PASS/FAIL summary row — `psql -f supabase/tests/rls_spec.sql`
+exits `0` no matter how many assertions fail (verified: forced 7 fake
+failures through the same parsing logic and confirmed it exits non-zero).
+Without this wrapper, CI would report "SQL/RLS: passed" on a real
+regression. The script parses the printed `passed | failed | total` row and
+fails the process when `failed != 0` or the row can't be found at all — it
+never hardcodes an expected count, so adding a legitimate new assertion
+never requires touching CI.
+
+**`scripts/setup-env-test.sh` replaces the manual `cp .env.test.example
+.env.test` + copy-from-`supabase status` step** (`docs/DEPLOY.md` sec 4)
+with `supabase status -o env --override-name ...`, which emits the same
+values under the exact variable names the app expects. Every value it
+writes is either a fixed local-only demo credential the Supabase CLI
+generates identically for every `supabase start` on every machine (never
+production — there is no production URL or key anywhere in the script or
+the workflow) or a disposable per-run string (`GUEST_COOKIE_SECRET`). The
+generated `NEXT_PUBLIC_SUPABASE_URL` is also exported as a real process env
+var for the job (via `$GITHUB_ENV`), which has one deliberate side effect:
+`get-daily-game.integration.test.ts`'s "remote" describe block (normally
+skipped unless `.env.local` points it at a real project) sees this local
+URL instead of being skipped, so in CI it harmlessly re-exercises the local
+stack rather than skipping — never production, since CI never has a
+production URL available to put there in the first place.
+
+**`scripts/secret-scan.sh`** replaces what had only ever been an ad hoc
+manual grep with a real, reproducible, dependency-free script (a handful of
+regexes for `sb_secret_...`, private-key blocks, embedded service-role
+JWTs, AWS-style keys, and Resend-style keys, over `git ls-files` only —
+never `node_modules` or build output). No scanning platform was added; the
+existing baseline didn't justify one.
+
+**Playwright artifacts.** `playwright.config.ts` now also writes an HTML
+report and captures screenshots/video on failure, but only when
+`process.env.CI` is set (same existing conditional pattern the file
+already used for `retries` and `reporter`) — local runs are unaffected.
+CI uploads `playwright-report/` and `test-results/` as a build artifact
+only when the job fails (7-day retention).
+
+**Worker/retry config was not touched.** `playwright.config.ts` already
+computes `retries`/`reporter` from `process.env.CI`, which GitHub Actions
+sets automatically — nothing in the workflow overrides `workers`. On a
+2-core GitHub-hosted runner, Playwright's own default (half of detected
+CPUs) naturally lands at a conservative worker count without any CI-
+specific configuration being needed.
+
+**Branch protection is a recommendation, not applied.** Two options were
+written up for `main`: a lightweight solo setup (require the CI check to
+pass before merge, block force-push/delete, no required PR review) and a
+stricter PR-required setup (same, plus PRs required even for the owner).
+Recommended for now: the lightweight option — Rankle is a one-person
+project, and requiring the owner to review their own PRs manually would be
+process for its own sake. Revisit if/when a second contributor joins.
+Neither was applied automatically; both require the repository owner to
+configure them (GitHub UI/API, not something this workflow file does).

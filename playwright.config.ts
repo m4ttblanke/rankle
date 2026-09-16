@@ -32,10 +32,16 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
-  reporter: process.env.CI ? "github" : "list",
+  // In CI, also write an HTML report (never opened automatically) alongside
+  // the GitHub annotations, and keep a screenshot/video for any failure —
+  // not just the ones that get a retry's trace — so a red run is
+  // diagnosable from the uploaded artifact alone. Local runs are unaffected.
+  reporter: process.env.CI ? [["github"], ["html", { open: "never" }]] : "list",
   use: {
     baseURL: "http://localhost:3000",
     trace: "on-first-retry",
+    screenshot: process.env.CI ? "only-on-failure" : "off",
+    video: process.env.CI ? "retain-on-failure" : "off",
   },
   projects: [
     { name: "chromium", use: { ...devices["Desktop Chrome"] } },
