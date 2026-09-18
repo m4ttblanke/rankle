@@ -1,15 +1,33 @@
 name: CI
 
-# Validates every PR and every push to main. Deployment stays entirely with
-# Vercel's existing Git integration (Preview on PRs, Production on merge to
-# main) — this workflow never deploys anything and never touches Vercel or
-# production Supabase. See docs/OPS.md sec 31 for the full design rationale.
+# Validates every PR and every push to main as five independent, parallel
+# jobs. Deployment stays entirely with Vercel's existing Git integration
+# (Preview on PRs, Production on merge to main) — this workflow never
+# deploys anything and never touches Vercel or production Supabase. See
+# docs/OPS.md sec 32 for the full design rationale, including why Vitest,
+# SQL & RLS, and Playwright each boot their own independent local Supabase
+# stack rather than sharing one across jobs.
+#
+# `ci` (job id) is a transitional compatibility job. It exists only so
+# main's branch protection — which currently requires the pre-split
+# aggregate check by name — keeps working while the migration to the five
+# named checks below happens safely. It performs no testing of its own; it
+# waits on all five real jobs and only reports success if every one of
+# them did. Remove it (and its `needs:` list) once branch protection has
+# been repointed at the five checks directly (docs/OPS.md sec 32).
 
 on:
   pull_request:
   push:
     branches: [main]
 
+# One concurrency group per workflow+ref: a new push to the same PR or the
+# same branch cancels that ref's still-running workflow (all of its jobs,
+# not just one), while different PRs/branches each get their own ref and
+# never cancel each other. `push: branches: [main]` all share the ref
+# `refs/heads/main`, so back-to-back direct pushes to main also cancel the
+# older run — acceptable since main is protected and direct pushes are the
+# admin-bypass exception, not the normal path.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -21,17 +39,32 @@ env:
   NEXT_TELEMETRY_DISABLED: "1"
 
 jobs:
-  ci:
-    name: Lint, typecheck, tests, build, secret scan
+  static:
+    name: Lint & Typecheck
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: "npm"
+      - name: Install dependencies
+        run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Typecheck
+        run: npm run typecheck
+
+  build:
+    name: Build & Secret Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
-      # Cheapest, most self-contained checks first — no dependencies
-      # installed yet, no Docker started yet, so an obvious problem here
-      # (a leaked credential, a lint/type error) fails in seconds rather
-      # than after paying for a Supabase boot.
+      # Cheapest, most self-contained check first — scans git-tracked
+      # files directly, no dependencies installed yet.
       - name: Secret scan
         run: bash scripts/secret-scan.sh
 
@@ -39,61 +72,114 @@ jobs:
         with:
           node-version-file: ".nvmrc"
           cache: "npm"
-
       - name: Install dependencies
         run: npm ci
-
-      - name: Lint
-        run: npm run lint
-
-      - name: Typecheck
-        run: npm run typecheck
 
       # No live backend is required for `next build` here: every route in
       # this app is server-rendered on demand (no generateStaticParams / no
       # build-time data fetching), so lib/env.ts only needs a
-      # syntactically-valid URL/key to pass its Zod schema. These values
-      # are never reachable — Supabase isn't started yet at this point in
-      # the job — and are distinct from the real local-stack values used
-      # by the test steps below.
-      - name: Production build (fast-fail, no backend required)
+      # syntactically-valid URL/key to pass its Zod schema. This job never
+      # starts Supabase at all — these values are placeholders, never
+      # reachable, and distinct from the real local-stack values the
+      # Vitest/SQL/Playwright jobs generate for themselves.
+      - name: Production build (no backend required)
         run: npm run build
         env:
           NEXT_PUBLIC_SUPABASE_URL: "http://127.0.0.1:54321"
           NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "sb_publishable_ci-placeholder"
           NEXT_PUBLIC_APP_URL: "http://localhost:3000"
 
-      # --- From here on: real local Supabase stack, real local Postgres,
-      # real local Auth/Mailpit — an ephemeral instance that lives and dies
-      # with this runner. Nothing below ever reads a GitHub Secret and
-      # nothing below can reach the production Supabase project (there is
-      # no production URL/key anywhere in this workflow to reach it with).
-      # Wrapped in a narrow retry (scripts/start-supabase-ci.sh) — this
-      # step alone can hit a transient public.ecr.aws/Docker Hub pull rate
-      # limit shared across GitHub-hosted runner IPs. Nothing else in this
-      # job retries.
+  vitest:
+    name: Vitest
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: "npm"
+      - name: Install dependencies
+        run: npm ci
+
+      # This job's own ephemeral local Supabase stack — not shared with
+      # the sql or playwright jobs, each of which boots an independent
+      # instance on its own runner. Wrapped in a narrow retry
+      # (scripts/start-supabase-ci.sh) — this step alone can hit a
+      # transient public.ecr.aws/Docker Hub pull rate limit shared across
+      # GitHub-hosted runner IPs. Nothing else in this job retries.
       - name: Start local Supabase
         run: bash scripts/start-supabase-ci.sh
-
       - name: Reset local database (apply migrations + seed)
         run: npm run db:reset
-
       - name: Generate .env.test from the local Supabase stack
         run: |
           npm run env:test:generate
-          # Export the same values as real process env vars so every later
-          # step (Vitest, the build-adjacent tooling, etc.) sees them
-          # without re-parsing the file. Still local-only, still ephemeral.
           sed 's/"//g' .env.test >> "$GITHUB_ENV"
 
       - name: Vitest (unit + shared-current-game integration)
         run: npm test
 
+      - name: Stop local Supabase
+        if: always()
+        run: npm run db:stop
+
+  sql:
+    name: SQL & RLS
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: "npm"
+      # No `npm ci` here: db:start/db:reset/test:sql are all thin wrappers
+      # around `npx supabase ...` and `psql` — neither touches this
+      # project's own node_modules, so there is nothing for it to install.
+
+      # This job's own ephemeral local Supabase stack (see the `vitest`
+      # job's comment on why this isn't shared across jobs).
+      - name: Start local Supabase
+        run: bash scripts/start-supabase-ci.sh
+      - name: Reset local database (apply migrations + seed)
+        run: npm run db:reset
+
+      # No .env.test generation needed: scripts/test-sql.sh's SUPABASE_DB_URL
+      # fallback already points at this exact local stack's fixed port.
       - name: SQL / RLS
         run: npm run test:sql
 
+      - name: Stop local Supabase
+        if: always()
+        run: npm run db:stop
+
+  playwright:
+    name: Playwright
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: "npm"
+      - name: Install dependencies
+        run: npm ci
+
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
+
+      # This job's own ephemeral local Supabase stack (see the `vitest`
+      # job's comment on why this isn't shared across jobs).
+      - name: Start local Supabase
+        run: bash scripts/start-supabase-ci.sh
+      - name: Reset local database (apply migrations + seed)
+        run: npm run db:reset
+      - name: Generate .env.test from the local Supabase stack
+        run: |
+          npm run env:test:generate
+          sed 's/"//g' .env.test >> "$GITHUB_ENV"
 
       - name: Playwright e2e
         run: npm run test:e2e
@@ -111,3 +197,12 @@ jobs:
       - name: Stop local Supabase
         if: always()
         run: npm run db:stop
+
+  # Transitional compatibility job — see the file-level comment above.
+  ci:
+    name: Lint, typecheck, tests, build, secret scan
+    needs: [static, build, vitest, sql, playwright]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: echo "All five CI checks passed."
