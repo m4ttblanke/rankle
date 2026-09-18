@@ -1,20 +1,14 @@
 name: CI
 
 # Validates every PR and every push to main as five independent, parallel
-# jobs. Deployment stays entirely with Vercel's existing Git integration
-# (Preview on PRs, Production on merge to main) — this workflow never
-# deploys anything and never touches Vercel or production Supabase. See
-# docs/OPS.md sec 32 for the full design rationale, including why Vitest,
-# SQL & RLS, and Playwright each boot their own independent local Supabase
-# stack rather than sharing one across jobs.
-#
-# `ci` (job id) is a transitional compatibility job. It exists only so
-# main's branch protection — which currently requires the pre-split
-# aggregate check by name — keeps working while the migration to the five
-# named checks below happens safely. It performs no testing of its own; it
-# waits on all five real jobs and only reports success if every one of
-# them did. Remove it (and its `needs:` list) once branch protection has
-# been repointed at the five checks directly (docs/OPS.md sec 32).
+# jobs — Lint & Typecheck, Build & Secret Scan, Vitest, SQL & RLS, and
+# Playwright — each a required status check on main. Deployment stays
+# entirely with Vercel's existing Git integration (Preview on PRs,
+# Production on merge to main) — this workflow never deploys anything and
+# never touches Vercel or production Supabase. See docs/OPS.md sec 32 for
+# the full design rationale, including why Vitest, SQL & RLS, and
+# Playwright each boot their own independent local Supabase stack rather
+# than sharing one across jobs.
 
 on:
   pull_request:
@@ -197,12 +191,3 @@ jobs:
       - name: Stop local Supabase
         if: always()
         run: npm run db:stop
-
-  # Transitional compatibility job — see the file-level comment above.
-  ci:
-    name: Lint, typecheck, tests, build, secret scan
-    needs: [static, build, vitest, sql, playwright]
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - run: echo "All five CI checks passed."
