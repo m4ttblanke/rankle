@@ -68,8 +68,12 @@ jobs:
       # with this runner. Nothing below ever reads a GitHub Secret and
       # nothing below can reach the production Supabase project (there is
       # no production URL/key anywhere in this workflow to reach it with).
+      # Wrapped in a narrow retry (scripts/start-supabase-ci.sh) — this
+      # step alone can hit a transient public.ecr.aws/Docker Hub pull rate
+      # limit shared across GitHub-hosted runner IPs. Nothing else in this
+      # job retries.
       - name: Start local Supabase
-        run: npm run db:start
+        run: bash scripts/start-supabase-ci.sh
 
       - name: Reset local database (apply migrations + seed)
         run: npm run db:reset
