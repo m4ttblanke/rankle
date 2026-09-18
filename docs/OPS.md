@@ -1087,3 +1087,88 @@ extra flexibility:
   push a hotfix straight to `main` without going through a PR, even solo.
   Revisit either the `enforce_admins` value or the whole PR-required shape
   if a second contributor joins or the bypass gap becomes a real problem.
+
+---
+
+## 32. CI split into five parallel checks (2026-09-18)
+
+The single combined job from sec 31 became five independent jobs in
+`.github/workflows/ci.yml`, each its own required GitHub status check:
+
+- **Lint & Typecheck** — lint + typecheck, no Supabase.
+- **Build & Secret Scan** — secret scan + `next build`, no Supabase (same
+  placeholder-env fast-fail build as before, sec 31).
+- **Vitest** — its own ephemeral local Supabase, then `npm test`.
+- **SQL & RLS** — its own ephemeral local Supabase, then `npm run test:sql`.
+- **Playwright** — its own ephemeral local Supabase, then `npm run test:e2e`.
+
+**Why three separate Supabase stacks instead of one shared job.** Vitest,
+SQL & RLS, and Playwright each boot an independent local Supabase stack on
+their own GitHub-hosted runner rather than sharing one job/runner (which
+was the sec-31 design). GitHub Actions has no supported way to share a
+running Docker Compose stack across jobs on different runners without
+standing up a remote/shared database — which sec 31 already ruled out for
+exactly the reason it would still apply here (a shared CI database is a
+production-shaped risk this project doesn't need). Each job pays its own
+~1.5-2 minute Supabase boot, in exchange for the three slowest parts of
+the old single job (Vitest, SQL/RLS, Playwright) now running concurrently
+instead of sequentially.
+
+**The `sql` job skips `npm ci` and `.env.test` generation.**
+`db:start`/`db:reset`/`test:sql` are all thin wrappers around `npx
+supabase ...` and `psql` — none of them touch this project's own
+`node_modules` (verified against a checkout with zero `node_modules`
+installed before writing this). `scripts/test-sql.sh`'s
+`SUPABASE_DB_URL` fallback already matches the local stack's fixed port,
+so there's nothing to generate either. This is the only job that skips
+these steps; `vitest` and `playwright` both need real `node_modules`
+(Vitest itself, `next dev` for Playwright's webServer) and both still
+generate `.env.test` the normal way.
+
+**Registry rate-limiting under 3x concurrent Supabase boots: evidence,
+not a regression.** The first real multi-job run hit
+`toomanyrequests: Rate exceeded` from `public.ecr.aws` in all three
+Supabase-booting jobs simultaneously — expected, since three jobs now
+pull the same ~12 images concurrently instead of one. Every one of them
+still succeeded on the *first* outer attempt of
+`scripts/start-supabase-ci.sh`: Docker's own per-layer retry-with-backoff
+absorbed the individual rate-limit hits before the script's outer retry
+ever needed to engage. One run isn't proof this never gets worse, but
+it's real evidence the existing two-layer retry (Docker's own, plus the
+script's outer 3-attempt/backoff wrapper) already has headroom for 3x the
+concurrent pull load — not a reason to preemptively consolidate the jobs
+back down.
+
+**Migration was done as a safe two-step branch-protection swap, not an
+admin bypass.** main's protection required the single old check by exact
+name (`Lint, typecheck, tests, build, secret scan`). The first version of
+the split workflow kept a transitional compatibility job under that exact
+same name, `needs:`-depending on all five real jobs and only succeeding
+if every one did — so the existing protection rule kept working
+unmodified while the five new jobs got their first real run. Once that
+run confirmed the five real check contexts against GitHub's own
+check-runs API (not guessed from job `name:` fields), branch protection
+was repointed at those five contexts in one API call, verified by reading
+the protection settings back, and *then* — only then — the now-unneeded
+compatibility job was deleted in a follow-up PR. Every PR in this
+migration (including the final compatibility-job removal) merged through
+the real protected-PR flow with all its own required checks green; none
+needed the admin bypass sec 31 describes.
+
+**Wall-clock:** the combined job (sec 31) ran ~7-8 minutes end to end. The
+split workflow's slowest required job (`Playwright`, ~5-7 minutes
+including its own Supabase boot) now bounds the wall clock instead of the
+*sum* of all steps, landing the same PR/push feedback in roughly
+5-6.5 minutes on runs observed so far — a real, if modest, improvement,
+not a dramatic one, since Playwright's own Supabase boot + test time was
+already the single largest piece of the old combined job.
+
+**Observed Playwright flakiness across several real runs this session
+(`admin.spec.ts`, `accounts.spec.ts`, `friends.spec.ts` — a different test
+each time) is consistent with the sec-30/sec-31 "transient shared-runner
+contention" finding, not a new or deterministic bug:** each flaked exactly
+once, on a different test, and each was absorbed by Playwright's existing
+`retries: 1` (already configured, untouched by this migration) or
+resolved cleanly on an immediate rerun of the identical commit. No code
+changed for this and none was warranted — see sec 30/31 for the
+established classification.

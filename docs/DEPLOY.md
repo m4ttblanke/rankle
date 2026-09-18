@@ -782,13 +782,26 @@ The interesting complexity belongs in the product experience, not the release pi
 ## 30. Continuous Integration (2026-09-15)
 
 `.github/workflows/ci.yml` is CI. It validates every pull request and every
-push to `main`: lint, typecheck, a production build, the full Vitest suite,
-`supabase/tests/rls_spec.sql`, Playwright, and a secret scan — all in one
-job, against a local Supabase stack the workflow starts with `npm run
-db:start`/`db:reset` and stops at the end. See `docs/OPS.md` sec 31 for the
-full design rationale (why one job, why the build step runs before Docker,
-why `scripts/test-sql.sh` and `scripts/secret-scan.sh` exist as thin
-wrapper scripts rather than inline workflow steps).
+push to `main` as five independent, parallel jobs, each its own required
+GitHub status check (split from a single combined job on 2026-09-18 — see
+`docs/OPS.md` sec 32):
+
+- **Lint & Typecheck** — lint + typecheck, no Supabase.
+- **Build & Secret Scan** — secret scan + a production build, no Supabase.
+- **Vitest** — its own ephemeral local Supabase, then the full Vitest suite.
+- **SQL & RLS** — its own ephemeral local Supabase, then
+  `supabase/tests/rls_spec.sql` via `npm run test:sql`.
+- **Playwright** — its own ephemeral local Supabase, then the full
+  Playwright suite.
+
+Vitest, SQL & RLS, and Playwright each start and stop their own local
+Supabase stack (`npm run db:start`/`db:reset`/`db:stop`, via
+`scripts/start-supabase-ci.sh`'s registry-rate-limit retry) rather than
+sharing one across jobs. See `docs/OPS.md` sec 31 for the original
+single-job design rationale (why the build step runs before Docker, why
+`scripts/test-sql.sh` and `scripts/secret-scan.sh` exist as thin wrapper
+scripts) and sec 32 for why the split introduced three independent
+Supabase stacks instead of one shared job.
 
 **CI and CD stay separate.** CI never deploys anything and never touches
 Vercel or a real Supabase project:
@@ -813,21 +826,27 @@ Vercel or a real Supabase project:
 SQL/RLS/secret-scan/build checks CI runs, in the same order, minus
 Playwright (README.md "Testing" section).
 
-**`main` is branch-protected (2026-09-18):** a pull request (zero required
-reviewer approvals) and a passing `Lint, typecheck, tests, build, secret
-scan` check are required before merging. Force pushes and branch deletion
-are blocked. The actual flow is now:
+**`main` is branch-protected (2026-09-18, required checks updated
+2026-09-18 when CI split into five jobs):** a pull request (zero required
+reviewer approvals) and five passing checks — **Lint & Typecheck**,
+**Build & Secret Scan**, **Vitest**, **SQL & RLS**, **Playwright** — are
+required before merging. Force pushes and branch deletion are blocked.
+The actual flow is now:
 
 ```text
 feature branch
   → pull request
-  → GitHub Actions CI
+  → Lint & Typecheck, Build & Secret Scan, Vitest, SQL & RLS, Playwright
+  → all five green
   → merge to main (owner-approved, no review required)
   → Vercel Production
   → rankle.io
 ```
 
 `enforce_admins` is deliberately `false` — the repository owner can still
-push directly to `main`, bypassing both the PR requirement and the CI
-gate. See `docs/OPS.md` sec 31 for the full tradeoff and how to close that
-gap later if it matters.
+push directly to `main`, bypassing both the PR requirement and all five
+CI checks. See `docs/OPS.md` sec 31 for the full tradeoff and how to close
+that gap later if it matters, and sec 32 for how the required-check
+migration itself was done safely (a temporary compatibility check bridged
+the old single required check to the five new ones, so the migration
+itself never needed the admin bypass).

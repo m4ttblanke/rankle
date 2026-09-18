@@ -523,6 +523,44 @@ meaningful sample), new-vs-returning and return rate (need multiple days).
     doesn't catch it because it waits for the page to settle past the
     loading state. Give it the same `<div>` treatment as the September
     2026 duplicate-banner fix (`docs/OPS.md` sec 30) when convenient.
+- [x] **Split CI into five parallel checks + migrate branch protection
+  (2026-09-18).** `.github/workflows/ci.yml`'s single combined job became
+  five independent jobs (Lint & Typecheck, Build & Secret Scan, Vitest,
+  SQL & RLS, Playwright), each a required GitHub status check. Migrated
+  safely: a transitional compatibility job under the old check's exact
+  name bridged branch protection while the five new jobs got their first
+  real run (PR #2, run `35395965838`); the five exact check contexts were
+  read from GitHub's check-runs API (not guessed) before branch
+  protection was repointed at them; the compatibility job was then
+  removed in a follow-up PR (#3). Every PR in the migration, including
+  both merges, went through the real protected-PR flow with no admin
+  bypass needed. Wall-clock improved from ~7-8 min to ~5-6.5 min (bounded
+  by Playwright's own job instead of the sum of all steps). All three
+  Supabase-booting jobs hit registry rate-limiting simultaneously on the
+  first run (expected, 3x the concurrent pull load) but all succeeded on
+  the first outer attempt — Docker's own per-layer retry absorbed it
+  before `scripts/start-supabase-ci.sh`'s outer retry needed to engage;
+  not a reason to consolidate the jobs back down. Full writeup:
+  `docs/OPS.md` sec 32, flow diagram: `docs/DEPLOY.md` sec 30.
+  - [ ] **Needs your attention — Vercel deployment pipeline, not a CI
+    problem (found 2026-09-18, unresolved as of this writing):** `rankle.io`
+    itself is healthy and serving correctly, but Vercel's Git integration
+    has not promoted *any* of today's several `main`-branch Production
+    deployments to the `rankle.io`/`www.rankle.io` aliases — they're still
+    pointing at a build from `73bb621`, roughly a day old at the time this
+    was noticed. This isn't just slow: at least one Production deployment
+    built from `main` (`dpl_CAUW95rERwpaDNP47cNjaGhKvRDy`, aliased to
+    `rankle-git-main-...`) finished **Ready** and *still* wasn't promoted
+    to the custom domain, and multiple other Production/Preview
+    deployments sat `Queued` for 50+ minutes without progressing. Every
+    commit stuck behind this is docs/CI-only (verified: zero application
+    code or dependency changes in any of them), so there is no current
+    user-facing impact — but if this doesn't clear on its own, the next
+    commit that *does* contain a real product change could silently fail
+    to reach production. Not investigated further or touched here (out of
+    scope — no Vercel configuration was changed); worth checking the
+    Vercel dashboard for a build-concurrency/plan limit or an account
+    notice.
 
 ## Security (deferred beyond the initial schema/RLS migration)
 
