@@ -418,14 +418,15 @@ These tests verify important database guarantees such as:
 ### Continuous Integration
 
 `.github/workflows/ci.yml` runs on every pull request and every push to
-`main`: lint, typecheck, a production build, the full Vitest suite, the
-SQL/RLS suite, Playwright, and the secret scan — all against an ephemeral
-local Supabase stack the workflow starts and tears down itself. It never
-reads a GitHub Secret and never has production credentials of any kind
+`main` as five independent, parallel, required checks — **Lint &
+Typecheck**, **Build & Secret Scan**, **Vitest**, **SQL & RLS**, and
+**Playwright** — the last three each against their own ephemeral local
+Supabase stack the workflow starts and tears down itself. It never reads
+a GitHub Secret and never has production credentials of any kind
 available to it. Deployment is unaffected and stays entirely with Vercel's
 existing Git integration (Preview on PRs, Production on merge to `main`).
-See `docs/OPS.md` sec 31 for the full design and `docs/DEPLOY.md` for the
-CI/CD boundary.
+See `docs/OPS.md` sec 31-32 for the full design and `docs/DEPLOY.md` for
+the CI/CD boundary.
 
 ---
 
