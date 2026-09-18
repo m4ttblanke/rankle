@@ -483,11 +483,46 @@ meaningful sample), new-vs-returning and return rate (need multiple days).
   ad hoc manual grep) — all three also usable locally via `npm run
   test:sql` / `env:test:generate` / `secret-scan`, plus a new `npm run
   verify` composing the non-browser checks.
-  - [ ] **Follow-up (not applied by this task — requires repo owner
-    action):** configure branch protection on `main` per the recommended
-    lightweight solo setup — require the CI check to pass before merge,
-    block force-push and branch deletion, no required PR review for now.
-    See `docs/OPS.md` sec 31.
+  - [x] **Follow-up, completed (2026-09-18):** branch protection configured
+    on `main` — see the dedicated entry below.
+- [x] **First real GitHub Actions run + branch protection (2026-09-18).**
+  Pushed the reliability (`7bfd48c`) and CI (`14259d9`) commits to
+  `origin/main` and observed the actual GitHub-hosted run rather than
+  assuming the local validation generalized. First run
+  (`35060072769`, commit `14259d9`) failed exactly one test:
+  `e2e/submission.spec.ts` › "a failed submission preserves the ranking
+  and allows retry" — deterministically, on both its attempt and its
+  retry — with a strict-mode locator violation (`getByRole('alert')`
+  matched both the app's own alert `<p>` and Next.js's always-present,
+  empty `__next-route-announcer__` div, which also carries `role="alert"`).
+  `e2e/friends.spec.ts` already scoped around this exact ambiguity with
+  `.filter({ hasText: ... })`; this one call site never got the same
+  treatment, and passed locally only because a fast local machine usually
+  wins the hydration race the slower GitHub runner didn't. Fixed with the
+  same established pattern (commit `73bb621`) — not `.first()`, no
+  assertion weakened. Second run (`35061562993`, commit `73bb621`) passed
+  clean: 98/98 Playwright on the first attempt (no retries), 489/489
+  Vitest, 277/277 SQL/RLS, lint/typecheck/build/secret-scan all green,
+  ~7.5 minutes end to end on the real 2-vCPU runner. Confirmed Vercel's
+  existing Git integration deployed both commits independently of the
+  Actions workflow (exact-second timestamp match between each push and
+  its corresponding Production deployment); GitHub Actions itself never
+  invokes Vercel. Configured branch protection on `main`: PR required
+  before merge, 0 required approving reviews, required status check
+  `Lint, typecheck, tests, build, secret scan`, force-push and deletion
+  blocked, `enforce_admins` deliberately left `false` (owner's explicit
+  choice — the owner can still push directly to `main`, bypassing the
+  gate; see `docs/OPS.md` sec 31 for the tradeoff). Full writeup:
+  `docs/OPS.md` sec 31, flow diagram: `docs/DEPLOY.md` sec 30.
+  - [ ] Minor, unrelated accessibility nit found during the production
+    smoke check (not fixed — out of scope for this task):
+    `components/layout/skeleton.tsx` (the App Router `loading.tsx`
+    fallback) renders its own `<header>`, duplicating the banner landmark
+    during the transient streaming/loading flash only. Pre-dates this
+    task's commits; `e2e/retention.spec.ts`'s `getByRole("banner")` check
+    doesn't catch it because it waits for the page to settle past the
+    loading state. Give it the same `<div>` treatment as the September
+    2026 duplicate-banner fix (`docs/OPS.md` sec 30) when convenient.
 
 ## Security (deferred beyond the initial schema/RLS migration)
 

@@ -1058,12 +1058,32 @@ sets automatically — nothing in the workflow overrides `workers`. On a
 CPUs) naturally lands at a conservative worker count without any CI-
 specific configuration being needed.
 
-**Branch protection is a recommendation, not applied.** Two options were
-written up for `main`: a lightweight solo setup (require the CI check to
-pass before merge, block force-push/delete, no required PR review) and a
-stricter PR-required setup (same, plus PRs required even for the owner).
-Recommended for now: the lightweight option — Rankle is a one-person
-project, and requiring the owner to review their own PRs manually would be
-process for its own sake. Revisit if/when a second contributor joins.
-Neither was applied automatically; both require the repository owner to
-configure them (GitHub UI/API, not something this workflow file does).
+**Branch protection is applied (2026-09-18).** Two shapes were considered
+for `main`: (A) direct pushes allowed, CI only observational after the
+fact; (B) a pull request required before merge, gated by the CI check,
+with zero required reviewer approvals. A status check that only runs
+*after* a push can't stop that push from landing — so (A) isn't actually a
+pre-merge gate, just a post-hoc signal. (B) was applied via classic branch
+protection (`PUT /repos/m4ttblanke/rankle/branches/main/protection`), not
+the newer rulesets API — nothing about this repo's scale needs rulesets'
+extra flexibility:
+
+- `required_status_checks`: `strict: true`, required check context
+  `"Lint, typecheck, tests, build, secret scan"` (the exact job `name:`
+  from `ci.yml` — this is the string GitHub actually keys required checks
+  on, not the workflow filename or the `jobs.<id>` key).
+- `required_pull_request_reviews.required_approving_review_count: 0` — a
+  PR is required before merge, but nobody has to approve it. No
+  `require_code_owner_reviews`, no `required_signatures`.
+- `allow_force_pushes: false`, `allow_deletions: false`.
+- `enforce_admins: false` — **deliberately**, by the repository owner's
+  explicit choice after being shown the tradeoff: Rankle's only
+  collaborator is also necessarily an admin on their own repo, so with
+  `enforce_admins: false` these rules bind only a hypothetical future
+  non-admin collaborator, and a direct `git push origin main` by the owner
+  today still bypasses both the PR requirement and the CI gate entirely.
+  Setting `enforce_admins: true` would close that gap (including for the
+  owner's own accidental direct pushes) at the cost of never being able to
+  push a hotfix straight to `main` without going through a PR, even solo.
+  Revisit either the `enforce_admins` value or the whole PR-required shape
+  if a second contributor joins or the bypass gap becomes a real problem.

@@ -812,3 +812,22 @@ Vercel or a real Supabase project:
 **Local parity:** `npm run verify` runs the same lint/typecheck/Vitest/
 SQL/RLS/secret-scan/build checks CI runs, in the same order, minus
 Playwright (README.md "Testing" section).
+
+**`main` is branch-protected (2026-09-18):** a pull request (zero required
+reviewer approvals) and a passing `Lint, typecheck, tests, build, secret
+scan` check are required before merging. Force pushes and branch deletion
+are blocked. The actual flow is now:
+
+```text
+feature branch
+  → pull request
+  → GitHub Actions CI
+  → merge to main (owner-approved, no review required)
+  → Vercel Production
+  → rankle.io
+```
+
+`enforce_admins` is deliberately `false` — the repository owner can still
+push directly to `main`, bypassing both the PR requirement and the CI
+gate. See `docs/OPS.md` sec 31 for the full tradeoff and how to close that
+gap later if it matters.
