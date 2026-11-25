@@ -5,7 +5,7 @@ import type { ArchiveEntry } from "@/lib/game/archive-schema";
 /**
  * Read-only browse of past Rankles (Milestone 9). Each row is a link only
  * when there's somewhere safe to send the visitor:
- *  - today's Rankle -> `/` (the real play/results flow, never a duplicate
+ *  - today's Rankle -> `/play` (the real play/results flow, never a duplicate
  *    "play again" path)
  *  - a past Rankle the viewer has already played -> their own existing
  *    `/history/[submissionId]` (no new detail route)
@@ -21,7 +21,7 @@ export function ArchiveList({ entries }: { entries: ArchiveEntry[] }) {
     <ul className="flex flex-col gap-2">
       {entries.map((entry) => {
         const href = entry.isToday
-          ? "/"
+          ? "/play"
           : entry.played && entry.submissionId
             ? `/history/${entry.submissionId}`
             : null;

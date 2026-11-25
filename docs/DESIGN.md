@@ -497,7 +497,7 @@ sitting idle beforehand.
   panel — the player is taken straight into the results reveal via
   `router.replace("/results")` (`replace`, not `push`: once the ranking is
   immutable, the pre-submit board is not a meaningful back-button
-  destination). `app/page.tsx` does the equivalent server-side (`redirect`)
+  destination). `app/play/page.tsx` does the equivalent server-side (`redirect`)
   for an identity recognised as already-submitted on a later visit, so the
   board never even mounts in that case.
 - **Failure:** an inline `role="alert"` message in plain language, ranking
@@ -629,6 +629,34 @@ Preferred storytelling:
 Scroll Craft may be used for intentional scroll-driven storytelling.
 
 The landing page must still work without motion.
+
+### As built (landing page)
+
+`/` (`app/page.tsx`) is the landing page; the game moved to `/play`. One
+visual language, borrowed from the brand mark: flat cards with a thick
+`--ink` outline and a hard offset shadow (`shadow-[Npx_Npx_0_0_var(--ink)]`),
+slight playful rotation, and the three brand colors (`--brand-pink`,
+`--brand-yellow`, `--brand-blue`, now tokens in `app/globals.css`) used for
+section bands and cards, never as tier colors. Tier chips still come from
+`tierStyle` (with the ink outline). Seven short sections: hero (headline,
+today's topic + CTA, `HeroBoard`), today's Rankle (yellow band, item chips,
+item count, friend count), how it works (01 Rank / 02 Lock it in / 03
+Compare, with N/A vs Unranked spelled out), results teaser (ink band), friends,
+daily/archive strip (pink band), account + final CTA.
+
+- **Hero visual** (`components/landing/hero-board.tsx`): an EMPTY tier board
+  with today's first few item labels floating around it, one drifting toward
+  the board and back. Nothing is ever placed, so it never implies a correct
+  answer. Decorative (`aria-hidden`).
+- **Motion**: two CSS keyframes (`rankle-bob`, `rankle-drop`), transform-only,
+  frozen by the global reduced-motion rule. No animation library.
+- **Demos** (`components/landing/demos.tsx`): fictional "Pizza Toppings"
+  hottest take / controversy / friend comparison, each tagged "Example",
+  reusing `DistributionBar`.
+- **CTA** (`components/landing/play-cta.tsx`): one adaptive button (play ->
+  `/play`, already submitted -> `/results`, no game -> `/archive`).
+- `AppHeader` is shared (one banner landmark); `wide` widens it to the landing
+  column (`max-w-5xl`). The nav gained "Play" -> `/play`; the logo -> `/`.
 
 ---
 
@@ -891,7 +919,7 @@ Still open:
 - [ ] Product name (currently "Rankle")
 - [ ] Motion timing
 - [ ] Card style (settle alongside the first tier board / drag feedback)
-- [ ] Landing-page visual language (deferred to Polish phase)
+- [x] Landing-page visual language — sticker-board cards (sec 20, "As built")
 - [ ] Tier color final review (after the first tier board exists)
 
 Until decided, avoid prematurely locking arbitrary choices into many files.

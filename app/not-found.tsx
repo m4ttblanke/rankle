@@ -10,7 +10,7 @@ export default function NotFound() {
         That page doesn&rsquo;t exist.
       </p>
       <Link
-        href="/"
+        href="/play"
         className="mt-1 rounded-md bg-accent px-4 py-2 text-sm font-semibold text-accent-foreground"
       >
         Go to today&rsquo;s game

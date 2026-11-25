@@ -82,7 +82,7 @@ async function withFailingClipboard(context: BrowserContext) {
 async function createShareLink(page: Page, context: BrowserContext): Promise<string> {
   await withoutNativeShare(context);
   await grantClipboard(context);
-  await page.goto("/");
+  await page.goto("/play");
   await rankAndSubmit(page);
   await expect(page.getByRole("heading", { name: /community verdict/i })).toBeVisible();
 
@@ -114,7 +114,7 @@ test("navigator.share is used when available, with a spoiler-free message", asyn
       },
     });
   });
-  await page.goto("/");
+  await page.goto("/play");
   await rankAndSubmit(page);
   await expect(page.getByRole("heading", { name: /community verdict/i })).toBeVisible();
 
@@ -146,7 +146,7 @@ test("cancelling the native share sheet (AbortError) is not shown as an error", 
       },
     });
   });
-  await page.goto("/");
+  await page.goto("/play");
   await rankAndSubmit(page);
   await page.getByRole("button", { name: /^share your ranking$/i }).click();
   await expect(page.getByRole("button", { name: /^share your ranking$/i })).toBeEnabled();
@@ -190,7 +190,7 @@ test("the gate's CTA carries the token into today's game, and a fresh submission
   const recipientPage = await recipientContext.newPage();
   await recipientPage.goto(url);
   await recipientPage.getByRole("link", { name: /play today.s rankle/i }).click();
-  await expect(recipientPage).toHaveURL(new RegExp(`/\\?share=${token}$`));
+  await expect(recipientPage).toHaveURL(new RegExp(`/play\\?share=${token}$`));
 
   await rankAndSubmit(recipientPage);
   await expect(recipientPage).toHaveURL(new RegExp(`/share/${token}/?$`));
@@ -211,21 +211,21 @@ test("a duplicate-submit outcome (already submitted today) also lands on /share/
 
   const recipientContext = await browser.newContext();
   const recipientPage = await recipientContext.newPage();
-  await recipientPage.goto(`/?share=${token}`);
+  await recipientPage.goto(`/play?share=${token}`);
   await rankAndSubmit(recipientPage);
   await expect(recipientPage).toHaveURL(new RegExp(`/share/${token}/?$`));
 
   // Same identity (same context -> same guest cookie) revisits the
   // continuation URL after already submitting: the SERVER-side
   // already-submitted redirect in app/page.tsx must also honor the token.
-  await recipientPage.goto(`/?share=${token}`);
+  await recipientPage.goto(`/play?share=${token}`);
   await expect(recipientPage).toHaveURL(new RegExp(`/share/${token}/?$`));
 
   await recipientContext.close();
 });
 
 test("ordinary gameplay without a share token still returns to /results", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/play");
   await rankAndSubmit(page);
   await expect(page).toHaveURL(/\/results\/?$/);
 });
@@ -233,7 +233,7 @@ test("ordinary gameplay without a share token still returns to /results", async 
 test("a malformed share query is dropped, not carried into the redirect target", async ({
   page,
 }) => {
-  await page.goto("/?share=not-a-real-token!!!");
+  await page.goto("/play?share=not-a-real-token!!!");
   await rankAndSubmit(page);
   await expect(page).toHaveURL(/\/results\/?$/);
 });
@@ -244,7 +244,7 @@ test("a share token for a non-current game cannot hijack today's post-submit des
   // The seeded old-game share points at "retro-snacks", not today's live
   // "fast-food-fries" game — the mismatch must be dropped before it reaches
   // the submission UI.
-  await page.goto(`/?share=${OLD_SHARE_TOKEN}`);
+  await page.goto(`/play?share=${OLD_SHARE_TOKEN}`);
   await rankAndSubmit(page);
   await expect(page).toHaveURL(/\/results\/?$/);
 });
@@ -252,7 +252,7 @@ test("a share token for a non-current game cannot hijack today's post-submit des
 test("no open redirect: a URL-shaped share param never navigates off-origin", async ({
   page,
 }) => {
-  await page.goto("/?share=https%3A%2F%2Fevil.example.com");
+  await page.goto("/play?share=https%3A%2F%2Fevil.example.com");
   await rankAndSubmit(page);
   // Still same-origin, still the ordinary results page -- the malformed
   // token was rejected by shape before ever being used.
@@ -267,7 +267,7 @@ test("an old, already-wrapped-up share shows a distinct 'wrapped up' state — n
   await expect(page.getByText(/already wrapped up/i)).toBeVisible();
   const playToday = page.getByRole("link", { name: /play today.s rankle instead/i });
   await expect(playToday).toBeVisible();
-  await expect(playToday).toHaveAttribute("href", "/");
+  await expect(playToday).toHaveAttribute("href", "/play");
   // Never implies this specific (old) game can still be played.
   await expect(page.getByRole("link", { name: /^play retro snacks$/i })).toHaveCount(0);
 });
@@ -314,7 +314,7 @@ test("clipboard copy failure after a successful share creation never claims Rank
 }) => {
   await withoutNativeShare(context);
   await withFailingClipboard(context);
-  await page.goto("/");
+  await page.goto("/play");
   await rankAndSubmit(page);
   await expect(page.getByRole("heading", { name: /community verdict/i })).toBeVisible();
 
@@ -340,7 +340,7 @@ test("mobile: the clipboard-failure fallback field renders without horizontal ov
   await page.setViewportSize({ width: 320, height: 844 });
   await withoutNativeShare(context);
   await withFailingClipboard(context);
-  await page.goto("/");
+  await page.goto("/play");
   await rankAndSubmit(page);
   await expect(page.getByRole("heading", { name: /community verdict/i })).toBeVisible();
 

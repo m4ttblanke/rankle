@@ -18,7 +18,7 @@ import { hasSubmittedRanking } from "@/lib/game/submission-state";
  * result data — both must pass before anything renders:
  *
  *  1. `hasSubmittedRanking` (app-level, cheap, spoiler-free) — a fast
- *     redirect back to the game for the common case.
+ *     redirect back to the game (`/play`) for the common case.
  *  2. `getResults` -> `get_results` RPC (the actual authority; SECURITY
  *     DEFINER, raises 42501 until this identity has an official submission).
  *
@@ -35,10 +35,10 @@ export default async function ResultsPage() {
   const guestId = await getGuestId();
 
   const eligible = await hasSubmittedRanking(game.id, guestId);
-  if (!eligible) redirect("/");
+  if (!eligible) redirect("/play");
 
   const results = await getResults(game.id, guestId);
-  if (!results) redirect("/");
+  if (!results) redirect("/play");
 
   // Friends is account-only (Milestone 7) -- a signed-out guest gets `null`
   // (ResultsView skips the section entirely for them), never an empty state

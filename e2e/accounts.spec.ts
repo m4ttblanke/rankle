@@ -111,7 +111,7 @@ async function rankAndSubmit(page: Page) {
 test("anonymous play is unaffected: header shows Sign in, game works without an account", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/play");
   await expect(page.getByRole("link", { name: /^sign in$/i })).toBeVisible();
   await rankAndSubmit(page);
   await expect(page).toHaveURL(/\/results\/?$/);
@@ -134,7 +134,7 @@ test("transition A: a guest who has never played can sign in and play normally a
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible(); // display name heading
   await expect(page.getByText(/your rankles \(0\)/i)).toBeVisible();
 
-  await page.goto("/");
+  await page.goto("/play");
   await rankAndSubmit(page);
   await expect(page).toHaveURL(/\/results\/?$/);
 
@@ -149,7 +149,7 @@ test("transition B: guest plays today's game, then signs in — claimed immediat
   const email = uniqueEmail("claim-today");
 
   // play as a fresh guest first
-  await page.goto("/");
+  await page.goto("/play");
   await rankAndSubmit(page);
   await expect(page).toHaveURL(/\/results\/?$/);
   await expect(page.getByRole("heading", { name: /community verdict/i })).toBeVisible();
@@ -159,7 +159,7 @@ test("transition B: guest plays today's game, then signs in — claimed immediat
   await signInViaMagicLink(page, email);
 
   // revisiting the game screen recognizes the claimed submission immediately
-  await page.goto("/");
+  await page.goto("/play");
   await expect(page).toHaveURL(/\/results\/?$/);
   await expect(page.getByRole("heading", { name: /community verdict/i })).toBeVisible();
 
@@ -223,7 +223,7 @@ test("history detail view is read-only and shows the player's own placements", a
   await page.goto("/login");
   await signInViaMagicLink(page, email);
 
-  await page.goto("/");
+  await page.goto("/play");
   await rankAndSubmit(page);
   await expect(page).toHaveURL(/\/results\/?$/);
 
@@ -245,7 +245,7 @@ test("another signed-in user cannot view someone else's history detail page", as
 
   await page.goto("/login");
   await signInViaMagicLink(page, emailOwner);
-  await page.goto("/");
+  await page.goto("/play");
   await rankAndSubmit(page);
   await expect(page).toHaveURL(/\/results\/?$/);
   await page.goto("/profile");
@@ -277,14 +277,16 @@ test("sign out clears the session; anonymous play still works afterward", async 
 
   await page.getByRole("button", { name: /^sign out$/i }).click();
   await expect(page).toHaveURL("http://localhost:3000/");
-  await expect(page.getByRole("link", { name: /^sign in$/i })).toBeVisible();
+  // header chrome flips back to signed-out (the landing page body also has
+  // its own "Sign in" link, so scope to the banner)
+  await expect(page.getByRole("banner").getByRole("link", { name: /^sign in$/i })).toBeVisible();
 
   // /profile is no longer accessible
   await page.goto("/profile");
   await expect(page).toHaveURL(/\/login\/?$/);
 
   // guest gameplay still works
-  await page.goto("/");
+  await page.goto("/play");
   await rankAndSubmit(page);
   await expect(page).toHaveURL(/\/results\/?$/);
 });

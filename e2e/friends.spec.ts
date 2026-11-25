@@ -104,7 +104,7 @@ async function rankAndSubmit(page: Page) {
 }
 
 test("anonymous visitors see no Friends nav link and are unaffected", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/play");
   await expect(page.getByRole("link", { name: /^sign in$/i })).toBeVisible();
   await expect(page.getByRole("link", { name: /^friends$/i })).toHaveCount(0);
   await page.goto("/friends");
@@ -147,14 +147,25 @@ test("full loop: search, request, accept, both play, see comparison, then unfrie
   await page.goto("/friends");
   await expect(page.getByRole("heading", { name: /^your friends \(1\)/i })).toBeVisible();
 
-  // both play and submit today's game
-  await page.goto("/");
-  await rankAndSubmit(page);
-  await expect(page).toHaveURL(/\/results\/?$/);
-
-  await pageB.goto("/");
+  // B plays first...
+  await pageB.goto("/play");
   await rankAndSubmit(pageB);
   await expect(pageB).toHaveURL(/\/results\/?$/);
+
+  // ...so A (not yet submitted) can check the landing page's friend cue:
+  // a bare count only — never B's identity, ranking, or agreement data.
+  const displayNameB = (await pageB.getByRole("banner").locator('a[href="/profile"]').textContent())!.trim();
+  await page.goto("/");
+  await expect(page.getByText(/^1 of your friends played today$/i)).toBeVisible();
+  await expect(page.getByRole("link", { name: /play today.s rankle/i }).first()).toHaveAttribute("href", "/play");
+  const landingMain = page.getByRole("main");
+  await expect(landingMain.getByText(displayNameB, { exact: false })).toHaveCount(0);
+  await expect(landingMain.getByText(/agreement today/i)).toHaveCount(0);
+
+  // then A plays
+  await page.goto("/play");
+  await rankAndSubmit(page);
+  await expect(page).toHaveURL(/\/results\/?$/);
 
   // A's results page now shows a Friends section with B's comparison
   await page.goto("/results");
@@ -233,7 +244,7 @@ test("a failed remove (session lost mid-page) shows a visible error and never fa
 });
 
 test("community results and sharing are unaffected by the Friends feature", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/play");
   await rankAndSubmit(page);
   await expect(page).toHaveURL(/\/results\/?$/);
   await expect(page.getByRole("heading", { name: /community verdict/i })).toBeVisible();

@@ -22,7 +22,7 @@ export function ShareWrappedUp({ share }: { share: ShareTeaser }) {
         no way to unlock this ranking now.
       </p>
       <Link
-        href="/"
+        href="/play"
         className="mt-2 rounded-md bg-accent px-4 py-2.5 font-display text-sm font-extrabold text-accent-foreground outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-background"
       >
         Play today&rsquo;s Rankle instead

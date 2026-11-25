@@ -1,7 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 
 /*
- * Official submission (Milestone 3), exercised on `/` against the local
+ * Official submission (Milestone 3), exercised on `/play` against the local
  * Supabase stack (see .env.test + playwright.config.ts), seeded by
  * `supabase/seed.sql` with a live "Fast Food Fries" game. Each test gets a
  * fresh browser context, so each run submits as its own distinct guest
@@ -54,7 +54,7 @@ async function expectOnResults(page: Page) {
 }
 
 test.beforeEach(async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/play");
   await expect(
     page.getByRole("heading", { level: 1, name: "Fast Food Fries" }),
   ).toBeVisible();
@@ -94,7 +94,7 @@ test("a failed submission preserves the ranking and allows retry", async ({
   // Fail the Server Action's POST exactly once, then let it through.
   let intercepted = false;
   await page.route(
-    (url) => url.pathname === "/",
+    (url) => url.pathname === "/play",
     async (route) => {
       if (route.request().method() === "POST" && !intercepted) {
         intercepted = true;
@@ -121,7 +121,7 @@ test("a failed submission preserves the ranking and allows retry", async ({
   await expectOnResults(page);
 });
 
-test("revisiting / after a successful submission redirects straight to /results", async ({
+test("revisiting /play after a successful submission redirects straight to /results", async ({
   page,
 }) => {
   await rankEveryItem(page);
@@ -130,7 +130,7 @@ test("revisiting / after a successful submission redirects straight to /results"
   await expectOnResults(page);
 
   // Server-side redirect (docs/SECURITY.md sec 7) — not a client re-render.
-  await page.goto("/");
+  await page.goto("/play");
   await expectOnResults(page);
   // no ranking controls at all — this identity can never see the board again
   await expect(page.locator("[data-card-id]")).toHaveCount(0);
@@ -173,7 +173,7 @@ test("keyboard-only submission flow", async ({ page }) => {
 
 test("mobile submission flow", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/");
+  await page.goto("/play");
   await rankEveryItem(page);
   await page.getByRole("button", { name: /^submit ranking$/i }).click();
   await page.getByRole("button", { name: /^lock it in$/i }).click();
@@ -189,7 +189,7 @@ for (const width of [320, 375, 390, 430, 768, 1280]) {
     page,
   }) => {
     await page.setViewportSize({ width, height: 900 });
-    await page.goto("/");
+    await page.goto("/play");
     await cardButton(page, "McDonald's").click();
     await page
       .getByRole("group", { name: /move mcdonald/i })
