@@ -78,7 +78,7 @@ function moveMessage(
  * intermediate "locked in" panel to keep in sync with the ranking state, so a
  * submitted ranking can never be mutated through this component at all.
  *
- * `app/page.tsx` redirects server-side to `/results` (or `/share/[token]`)
+ * `app/play/page.tsx` redirects server-side to `/results` (or `/share/[token]`)
  * before this component ever mounts for an identity that already submitted
  * today, so this component only ever needs to handle a *fresh* submission in
  * this session.
@@ -89,7 +89,7 @@ export function RankingBoard({
 }: {
   game: DailyGame;
   /** An already-validated share continuation token (Milestone 5) — see
-   *  `app/page.tsx`'s `resolveShareContinuation`. `null`/`undefined` for
+   *  `app/play/page.tsx`'s `resolveShareContinuation`. `null`/`undefined` for
    *  ordinary play. Only ever used to build `/share/${shareToken}`, never
    *  accepted as a full URL. */
   shareToken?: string | null;

@@ -112,7 +112,7 @@ export async function listFriendRequests(): Promise<FriendRequestsList> {
  * Boolean-only "has this friend submitted today's/this game's ranking" —
  * safe to call BEFORE the caller's own submission (docs/MANUAL.md sec 17).
  * Never returns ranking data; used both for `/friends`' per-row status and
- * the pre-submission "N friends played today" line on `/`.
+ * the pre-submission "N friends played today" line on `/play` and the landing page `/`.
  */
 export async function getFriendPlayedStatus(tierlistId: string): Promise<FriendPlayedStatus[]> {
   const user = await getCurrentUser();

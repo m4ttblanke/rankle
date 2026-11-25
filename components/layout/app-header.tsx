@@ -10,18 +10,23 @@ import { getCurrentProfile } from "@/lib/auth/current-user";
  * "Sign out". Server Component — reads the current profile itself so every
  * page gets consistent chrome without threading auth state through props.
  *
+ * The logo goes to `/` (the landing page); "Play" goes to `/play` (today's
+ * game) — the one explicit route into gameplay from the chrome. `wide`
+ * matches the landing page's wider column; every other route keeps the
+ * game's narrow one.
+ *
  * "Admin" link (Milestone 10) reuses `isCurrentUserAdmin()` — the same
  * `is_admin_user()` RPC boundary `requireAdmin()` enforces server-side on
  * `/admin` itself — rather than a second admin check. This link is purely a
  * convenience; hiding it from non-admins is not the authorization boundary
  * (docs/SECURITY.md sec 4), `requireAdmin()` still gates the route itself.
  */
-export async function AppHeader() {
+export async function AppHeader({ wide = false }: { wide?: boolean } = {}) {
   const profile = await getCurrentProfile();
   const isAdmin = profile ? await isCurrentUserAdmin() : false;
 
   return (
-    <header className="mx-auto flex w-full max-w-2xl items-baseline justify-between gap-3 px-4 pt-5 sm:px-6 sm:pt-8">
+    <header className={`mx-auto flex w-full ${wide ? "max-w-5xl" : "max-w-2xl"} items-baseline justify-between gap-3 px-4 pt-5 sm:px-6 sm:pt-8`}>
       <Link
         href="/"
         className="flex items-center gap-1.5 font-display text-lg font-extrabold tracking-tight text-foreground outline-none focus-visible:ring-2 focus-visible:ring-accent"
@@ -39,7 +44,13 @@ export async function AppHeader() {
         />
         Rankle
       </Link>
-      <nav className="flex items-center gap-3 text-xs">
+      <nav aria-label="Main" className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 text-xs">
+        <Link
+          href="/play"
+          className="font-semibold text-foreground underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-accent"
+        >
+          Play
+        </Link>
         <Link
           href="/archive"
           className="font-semibold text-foreground underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-accent"

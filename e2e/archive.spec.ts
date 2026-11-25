@@ -79,12 +79,12 @@ test("guest archive never fabricates a played indicator", async ({ page }) => {
   await expect(liveRow.getByText(/^today$/i)).toBeVisible();
 });
 
-test("today's Rankle links to / and an unplayed past Rankle is never a link", async ({
+test("today's Rankle links to /play and an unplayed past Rankle is never a link", async ({
   page,
 }) => {
   await page.goto("/archive");
   await page.getByRole("link", { name: /fast food fries/i }).click();
-  await expect(page).toHaveURL(/\/$/);
+  await expect(page).toHaveURL(/\/play\/?$/);
 
   // no submission path to old games, by design (docs/MANUAL.md sec 25)
   await page.goto("/archive");

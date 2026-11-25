@@ -103,7 +103,7 @@ async function rankAndSubmit(page: Page) {
 test("return cue renders on /results with the countdown, without breaking the rest of the reveal (guest, no streak claim)", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/play");
   await rankAndSubmit(page);
 
   await expect(page.getByRole("heading", { name: /community verdict/i })).toBeVisible();
@@ -122,7 +122,7 @@ test("an authenticated player's first submission shows a 1-Rankle streak on /res
   await page.goto("/login");
   await signInViaMagicLink(page, email);
 
-  await page.goto("/");
+  await page.goto("/play");
   await rankAndSubmit(page);
   await expect(page.getByText(/^1 rankle in a row$/i)).toBeVisible();
 
@@ -138,7 +138,7 @@ test("no horizontal overflow on /results or /profile at mobile widths after the 
   const email = uniqueEmail("retention-mobile");
   await page.goto("/login");
   await signInViaMagicLink(page, email);
-  await page.goto("/");
+  await page.goto("/play");
   await rankAndSubmit(page);
 
   for (const width of [375, 430]) {
@@ -163,7 +163,7 @@ test("the new M9 route boundaries (loading/error scaffolding) don't themselves b
   await page.goto("/login");
   await signInViaMagicLink(page, email);
 
-  for (const path of ["/", "/archive", "/friends", "/profile"]) {
+  for (const path of ["/", "/play", "/archive", "/friends", "/profile"]) {
     await page.goto(path);
     await expect(page.getByRole("banner")).toBeVisible();
   }

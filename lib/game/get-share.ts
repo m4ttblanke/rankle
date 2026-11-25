@@ -45,7 +45,7 @@ export async function getShare(
  * `tierlistId` (Product Analytics milestone, docs/TODO.md). Used only to
  * attribute `share_recipient_submitted` — it is NOT an eligibility check
  * (deliberately calls `getShare(token, null)`, the same "what game does this
- * represent" pattern as `app/page.tsx`'s `resolveShareContinuation`, never
+ * represent" pattern as `app/play/page.tsx`'s `resolveShareContinuation`, never
  * asking whether this identity is unlocked) and it never influences what
  * gets submitted. A token that fails this (wrong game, unknown, revoked,
  * malformed) cannot be used to credit an unrelated share — attribution can't

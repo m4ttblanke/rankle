@@ -9,7 +9,7 @@ import type { ShareTeaser } from "@/lib/game/share-schema";
  * page: only what `get_share`'s teaser already returns before eligibility.
  *
  * The CTA carries the (already server-validated) share token as a narrow
- * `?share=` query param into `/` — see `app/page.tsx` — so a successful or
+ * `?share=` query param into `/play` — see `app/play/page.tsx` — so a successful or
  * duplicate submission can return the player straight to this reveal instead
  * of the ordinary `/results`.
  */
@@ -40,7 +40,7 @@ export function ShareGate({
         Think you agree?
       </p>
       <Link
-        href={`/?share=${token}`}
+        href={`/play?share=${token}`}
         className="mt-2 w-full max-w-xs rounded-md bg-accent px-4 py-3 text-center font-display text-base font-extrabold text-accent-foreground outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-background"
       >
         Play today&rsquo;s Rankle

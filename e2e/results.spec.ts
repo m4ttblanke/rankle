@@ -39,7 +39,7 @@ const cardButton = (page: Page, label: string) =>
   page.getByRole("button", { name: new RegExp(`^${escapeRe(label)} — `) });
 
 async function submitFullRanking(page: Page) {
-  await page.goto("/");
+  await page.goto("/play");
   await expect(
     page.getByRole("heading", { level: 1, name: "Fast Food Fries" }),
   ).toBeVisible();
@@ -63,7 +63,7 @@ test("a fresh identity hitting /results directly is redirected, with no spoiler 
 }) => {
   const forbidden = /consensus|controvers|hottest take|community verdict/i;
   await page.goto("/results");
-  await expect(page).toHaveURL("http://localhost:3000/"); // redirected away from /results
+  await expect(page).toHaveURL("http://localhost:3000/play"); // redirected away from /results, back to the game
   await expect(page.getByText(forbidden)).toHaveCount(0);
   // the daily game screen, not any part of the reveal
   await expect(
@@ -85,7 +85,7 @@ test("one identity's submission does not unlock another identity's results", asy
   const otherContext = await browser.newContext();
   const otherPage = await otherContext.newPage();
   await otherPage.goto("/results");
-  await expect(otherPage).toHaveURL("http://localhost:3000/");
+  await expect(otherPage).toHaveURL("http://localhost:3000/play");
   await expect(
     otherPage.getByText(/consensus|controvers|hottest take|community verdict/i),
   ).toHaveCount(0);
