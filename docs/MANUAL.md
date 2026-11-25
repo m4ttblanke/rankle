@@ -500,9 +500,10 @@ After both users submit, comparison becomes available.
 only `{ user_id, played: boolean }` per friend — never ranking data, never
 tier/position fields, so it's safe to call before the caller's own
 submission. `/friends` shows it per-row ("Played today" / "Hasn't played
-yet") for the current live game only; `/` shows a single spoiler-safe count
+yet") for the current live game only; `/play` shows a single spoiler-safe count
 line ("N friends played today") above the ranking board for a signed-in
-player with friends, using the same RPC. A signed-out visitor never triggers
+player with friends, and the landing page `/` shows the same bare count
+("N of your friends played today"), both using the same RPC. A signed-out visitor never triggers
 this call.
 
 ---
@@ -631,8 +632,9 @@ re-verifies ownership — the id is never an authorization mechanism on its
 own. `create_share` was already idempotent (one share per submission), so a
 repeated "Share" tap reuses the same token.
 
-**Share continuation:** a locked `ShareGate`'s CTA links to `/?share=<token>`
-rather than plain `/`. `app/page.tsx` validates that token's shape and calls
+**Share continuation:** a locked `ShareGate`'s CTA links to `/play?share=<token>`
+(the game route, never the landing page) rather than plain `/play`.
+`app/play/page.tsx` validates that token's shape and calls
 `getShare(token, null)` solely to learn which game the token represents
 (compared against `getDailyGame()`'s slug) before carrying it into
 `RankingBoard` — that result is never serialized, rendered, or otherwise
@@ -730,7 +732,18 @@ Clearly distinguish today's official game from historical play.
 
 ## 26. Routes
 
-Likely routes include:
+**As built:** `/` is the public landing page (today's topic, adaptive CTA,
+how it works, example results, friends, recent topics, sign-in pitch).
+`/play` is today's ranking board. `/results` is the post-submit reveal
+(redirects to `/play` until this identity has submitted). `/share/[token]`
+is the spoiler-safe recipient flow; its gate continues to
+`/play?share=<token>`, never through `/`. Also live: `/archive`, `/login`,
+`/auth/callback`, `/profile`, `/history/[submissionId]`, `/friends`,
+`/admin`, `/admin/tierlists/*`. Landing-page CTA states: not submitted ->
+"Play Today's Rankle" (`/play`); already submitted -> "See Today's Results"
+(`/results`); no live game -> a "not up yet" message + `/archive`.
+
+Original planning list:
 
 ```text
 /
@@ -903,7 +916,7 @@ share link ever got opened or converted:
 
 | Event | Fires | Client/Server | Properties |
 |---|---|---|---|
-| `daily_game_viewed` | The board actually renders for a not-yet-submitted identity (already-submitted visitors are redirected before this, by `app/page.tsx`) | Server (`app/page.tsx`) | `tierlist_id`, `authenticated`, `entry_source` (`direct`/`share`), `item_count` |
+| `daily_game_viewed` | The board actually renders for a not-yet-submitted identity (already-submitted visitors are redirected before this, by `app/play/page.tsx`). Never fires on the landing page `/`: landing traffic is Vercel Web Analytics page views only | Server (`app/play/page.tsx`) | `tierlist_id`, `authenticated`, `entry_source` (`direct`/`share`), `item_count` |
 | `ranking_started` | First movement of any item out of Unranked, once per page session | Client, via `app/actions/log-event.ts` (`components/game/ranking-board.tsx`) | `tierlist_id`, `authenticated`, `entry_source` |
 | `ranking_completed` | First transition from incomplete to fully ranked (N/A counts as an intentional, completed placement); moving already-placed items afterward never refires it | Client, via `app/actions/log-event.ts` | `tierlist_id`, `authenticated`, `entry_source`, `item_count` |
 | `ranking_submitted` | A fresh official submission succeeds — never on the duplicate/"already submitted" branch, since the database already counted that submission once | Server (`app/actions/submit-ranking.ts`) | `tierlist_id`, `authenticated`, `entry_source`, `duration_ms` (client-timed start -> submit, discarded rather than clamped if implausible — see below) |

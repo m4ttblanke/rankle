@@ -278,7 +278,8 @@ a visitor and any result data, in `app/results/page.tsx`:
    without ever distinguishing "not eligible" from "transient failure" to the
    caller.
 
-`app/page.tsx` also redirects to `/results` server-side when it detects an
+`app/play/page.tsx` (today's game; `/` is the landing page since the
+landing-page change) also redirects to `/results` server-side when it detects an
 already-submitted identity, so the ranking board never renders for someone who
 cannot use it — but that redirect is the same UX convenience as (1), not a
 security boundary; gate (2) alone is what a raw PostgREST call against
@@ -290,6 +291,18 @@ never unlocks another's (`supabase/tests/rls_spec.sql`,
 `lib/game/get-results.integration.test.ts`, `e2e/results.spec.ts`).
 
 ---
+
+**Landing page (`/`).** The public landing page is pre-submission by
+definition, so it reads only spoiler-free data: `get_daily_game` (title,
+prompt, item labels — what `/play` already shows anyone),
+`has_submitted_ranking` (a boolean, used only to pick the CTA: Play -> `/play`
+or See Today's Results -> `/results`), `get_friend_played_status` reduced to a
+bare count, and public archive titles/dates. It never calls `get_results`,
+`get_share`, or `get_friend_results`, so no result data exists in its HTML or
+RSC payload. Its results/friend visuals are hard-coded fiction labelled
+"Example". Its metadata is static and topic-free. It is dynamic (cookie-read),
+never served from a shared cache. Covered by `app/page.test.ts` and
+`e2e/daily-game.spec.ts` (DOM + RSC-payload check after real results exist).
 
 ## 8. Share Tokens
 
@@ -341,9 +354,9 @@ cache path where one visitor's unlocked response could reach another.
 social preview stays spoiler-free regardless of who (or what crawler)
 requests it.
 
-**Old/foreign share tokens:** the `/?share=<token>` continuation param
+**Old/foreign share tokens:** the `/play?share=<token>` continuation param
 (carried from a locked `ShareGate` into gameplay so a fresh submission lands
-back on the reveal) is validated in `app/page.tsx` before it can affect
+back on the reveal) is validated in `app/play/page.tsx` before it can affect
 anything — shape-checked, then confirmed to correspond to *today's* live
 game via `getShare(token, null)`. This call exists ONLY to answer "what game
 does this token represent" (compared against `getDailyGame()`'s slug) — its

@@ -523,6 +523,11 @@ meaningful sample), new-vs-returning and return rate (need multiple days).
     doesn't catch it because it waits for the page to settle past the
     loading state. Give it the same `<div>` treatment as the September
     2026 duplicate-banner fix (`docs/OPS.md` sec 30) when convenient.
+    **Update (landing page, 2026-11-25):** still open, deliberately not
+    fixed in that task. The old root `app/loading.tsx` (which has the same
+    extra `<header>`) moved verbatim to `app/play/loading.tsx` with the
+    game. The new root `app/loading.tsx` (landing skeleton) uses a `<div>`
+    wordmark, so it does not add a new instance.
 - [x] **Split CI into five parallel checks + migrate branch protection
   (2026-09-18).** `.github/workflows/ci.yml`'s single combined job became
   five independent jobs (Lint & Typecheck, Build & Secret Scan, Vitest,
@@ -1423,3 +1428,30 @@ own:**
   (`AbortError`) was already handled correctly and is unchanged. No
   database/RLS change; no analytics vocabulary change (this bug and its fix
   are entirely client-side UI state).
+
+
+## Public landing page + game moved to `/play` (2026-11-25)
+
+- [x] `/` is now a public landing page (`app/page.tsx`): hero with today's
+  topic and an adaptive CTA, today's Rankle (item chips, item count,
+  spoiler-free friend count), how it works (N/A vs Unranked spelled out),
+  a fictional "Example" results teaser, a friends section, a recent-topics
+  strip linking `/archive`, and an account pitch + final CTA. CTA: not
+  submitted -> `/play`; submitted -> `/results`; no game -> `/archive`.
+- [x] Today's game moved from `/` to `/play` (`git mv`, logic unchanged:
+  same resolver, same already-submitted redirect, same `?share=`
+  validation, same `daily_game_viewed` call, so it still fires only on
+  board entry and never on the landing page).
+- [x] Re-pointed every gameplay link: `ShareGate` -> `/play?share=<token>`;
+  `ShareWrappedUp` / `InvalidShare` / 404 "today's game" links -> `/play`;
+  archive "today" row -> `/play`; `/results` ineligible redirect -> `/play`.
+  Kept `/` where it means homepage: logo, sign-out, `requireAdmin` bounce.
+- [x] Header: added "Play" -> `/play`; `wide` option for the landing column.
+- [x] No migration, no RLS change, no new dependency, no new analytics event
+  (Vercel Web Analytics page views already cover landing traffic).
+- [x] Tests: `app/page.test.ts` (10), `app/play/page.test.ts` (6);
+  `e2e/daily-game.spec.ts` split into `/` (landing) and `/play` (+10); every
+  other spec's gameplay navigation moved to `/play`.
+- [ ] Production verification on rankle.io after a normal Vercel Git deploy
+  (blocked on the separate production-promotion investigation; do not
+  force it).
